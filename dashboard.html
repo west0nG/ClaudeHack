@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hackathon Agent Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Segoe UI', Roboto, monospace; background: #0d1117; color: #c9d1d9; padding: 20px; }
+  h1 { color: #58a6ff; margin-bottom: 8px; font-size: 1.4em; }
+  .subtitle { color: #8b949e; margin-bottom: 20px; font-size: 0.9em; }
+  .status-bar { display: flex; gap: 16px; margin-bottom: 20px; padding: 12px 16px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; }
+  .status-bar .stat { display: flex; flex-direction: column; }
+  .status-bar .stat-label { font-size: 0.75em; color: #8b949e; text-transform: uppercase; }
+  .status-bar .stat-value { font-size: 1.3em; font-weight: bold; }
+  .columns { display: flex; gap: 20px; }
+  .col-sessions { flex: 2; }
+  .col-events { flex: 1; }
+  .section-title { font-size: 0.85em; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+
+  /* Session cards */
+  .session { background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
+  .session-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; cursor: pointer; user-select: none; }
+  .session-header:hover { background: #1c2128; }
+  .session-id { font-weight: 600; font-size: 0.95em; }
+  .session-badge { font-size: 0.75em; padding: 2px 8px; border-radius: 12px; font-weight: 600; }
+  .badge-running { background: #1f6feb33; color: #58a6ff; }
+  .badge-completed { background: #23863533; color: #3fb950; }
+  .badge-failed { background: #da363333; color: #f85149; }
+  .badge-pending { background: #30363d; color: #8b949e; }
+  .badge-retrying { background: #9e6a0333; color: #d29922; }
+  .session-body { display: none; padding: 0 14px 10px; }
+  .session-body.open { display: block; }
+  .session-activity { font-size: 0.85em; color: #8b949e; padding: 0 14px 8px; }
+  .log-line { font-size: 0.8em; color: #8b949e; padding: 2px 0; border-bottom: 1px solid #21262d; font-family: monospace; }
+  .log-line .ts { color: #484f58; margin-right: 8px; }
+
+  /* Event stream */
+  .event-stream { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 10px 14px; max-height: 80vh; overflow-y: auto; }
+  .event-item { font-size: 0.8em; padding: 4px 0; border-bottom: 1px solid #21262d; }
+  .event-item .ev-time { color: #484f58; margin-right: 6px; }
+  .event-item .ev-type { color: #d2a8ff; margin-right: 6px; }
+
+  .disconnected { color: #f85149; font-style: italic; margin-bottom: 12px; }
+  .connected { color: #3fb950; margin-bottom: 12px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+
+<h1>Hackathon Agent Dashboard</h1>
+<div class="subtitle">Real-time monitoring for autonomous hackathon ideation</div>
+
+<div id="conn-status" class="disconnected">Connecting to ws://localhost:8765...</div>
+
+<div class="status-bar">
+  <div class="stat"><span class="stat-label">Stage</span><span class="stat-value" id="s-stage">—</span></div>
+  <div class="stat"><span class="stat-label">Sessions</span><span class="stat-value" id="s-sessions">0</span></div>
+  <div class="stat"><span class="stat-label">Completed</span><span class="stat-value" id="s-completed" style="color:#3fb950">0</span></div>
+  <div class="stat"><span class="stat-label">Failed</span><span class="stat-value" id="s-failed" style="color:#f85149">0</span></div>
+  <div class="stat"><span class="stat-label">Idea Cards</span><span class="stat-value" id="s-cards" style="color:#d2a8ff">0</span></div>
+</div>
+
+<div class="columns">
+  <div class="col-sessions">
+    <div class="section-title">Sessions</div>
+    <div id="sessions-container"></div>
+  </div>
+  <div class="col-events">
+    <div class="section-title">Event Stream</div>
+    <div class="event-stream" id="event-stream"></div>
+  </div>
+</div>
+
+<script>
+const WS_URL = 'ws://localhost:8765';
+const sessions = {};  // session_id -> {status, activity, logs[]}
+let totalCompleted = 0, totalFailed = 0, totalCards = 0;
+
+function fmtTime(ts) {
+  const d = new Date(ts * 1000);
+  return d.toLocaleTimeString('en-US', {hour12: false, hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}
+
+function getOrCreateSession(id) {
+  if (!sessions[id]) {
+    sessions[id] = { status: 'pending', activity: '', logs: [] };
+    renderSession(id);
+  }
+  return sessions[id];
+}
+
+function renderSession(id) {
+  const container = document.getElementById('sessions-container');
+  let el = document.getElementById('sess-' + id);
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'session';
+    el.id = 'sess-' + id;
+    el.innerHTML = `
+      <div class="session-header" onclick="toggleSession('${id}')">
+        <span class="session-id">${id}</span>
+        <span class="session-badge badge-pending" id="badge-${id}">pending</span>
+      </div>
+      <div class="session-activity" id="activity-${id}"></div>
+      <div class="session-body" id="body-${id}"></div>
+    `;
+    container.prepend(el);
+  }
+  const s = sessions[id];
+  const badge = document.getElementById('badge-' + id);
+  badge.textContent = s.status;
+  badge.className = 'session-badge badge-' + s.status;
+  document.getElementById('activity-' + id).textContent = s.activity;
+  document.getElementById('s-sessions').textContent = Object.keys(sessions).length;
+}
+
+function appendLog(id, text, ts) {
+  const s = getOrCreateSession(id);
+  s.logs.push({ text, ts });
+  const body = document.getElementById('body-' + id);
+  if (body) {
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.innerHTML = `<span class="ts">${fmtTime(ts)}</span>${escHtml(text)}`;
+    body.appendChild(line);
+  }
+}
+
+function toggleSession(id) {
+  const body = document.getElementById('body-' + id);
+  if (body) body.classList.toggle('open');
+}
+
+function addEvent(type, text, ts) {
+  const stream = document.getElementById('event-stream');
+  const item = document.createElement('div');
+  item.className = 'event-item';
+  item.innerHTML = `<span class="ev-time">${fmtTime(ts)}</span><span class="ev-type">${escHtml(type)}</span>${escHtml(text)}`;
+  stream.prepend(item);
+  // Keep max 200 events
+  while (stream.children.length > 200) stream.removeChild(stream.lastChild);
+}
+
+function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function handleEvent(ev) {
+  const { type, data, timestamp } = ev;
+  const ts = timestamp || Date.now() / 1000;
+
+  addEvent(type, JSON.stringify(data).slice(0, 120), ts);
+
+  if (type === 'session_started') {
+    const s = getOrCreateSession(data.session_id);
+    s.status = 'running';
+    s.activity = `Starting (${data.model || 'sonnet'})`;
+    renderSession(data.session_id);
+    appendLog(data.session_id, 'Session started', ts);
+  }
+  else if (type === 'session_progress') {
+    const s = getOrCreateSession(data.session_id);
+    s.activity = data.activity || '';
+    renderSession(data.session_id);
+    appendLog(data.session_id, data.activity || 'progress', ts);
+  }
+  else if (type === 'session_completed') {
+    const s = getOrCreateSession(data.session_id);
+    s.status = 'completed';
+    s.activity = `Done in ${data.duration || '?'}s — ${(data.files||[]).length} files`;
+    totalCompleted++;
+    document.getElementById('s-completed').textContent = totalCompleted;
+    renderSession(data.session_id);
+    appendLog(data.session_id, `Completed: ${(data.files||[]).join(', ')}`, ts);
+  }
+  else if (type === 'session_failed') {
+    const s = getOrCreateSession(data.session_id);
+    s.status = 'failed';
+    s.activity = data.error || 'Unknown error';
+    totalFailed++;
+    document.getElementById('s-failed').textContent = totalFailed;
+    renderSession(data.session_id);
+    appendLog(data.session_id, `Failed: ${data.error}`, ts);
+  }
+  else if (type === 'session_retrying') {
+    const s = getOrCreateSession(data.session_id);
+    s.status = 'retrying';
+    s.activity = `Retry attempt ${data.attempt}`;
+    renderSession(data.session_id);
+  }
+  else if (type === 'stage_started') {
+    document.getElementById('s-stage').textContent = `Stage ${data.stage}`;
+  }
+  else if (type === 'stage_completed') {
+    document.getElementById('s-stage').textContent = `Stage ${data.stage} ✓`;
+    if (data.cards !== undefined) {
+      totalCards = data.cards;
+      document.getElementById('s-cards').textContent = totalCards;
+    }
+  }
+  else if (type === 'directions_found') {
+    addEvent('info', `Found ${data.count} crowd directions: ${(data.directions||[]).join(', ')}`, ts);
+  }
+}
+
+// WebSocket connection with auto-reconnect
+function connect() {
+  const ws = new WebSocket(WS_URL);
+  const connEl = document.getElementById('conn-status');
+
+  ws.onopen = () => { connEl.className = 'connected'; connEl.textContent = 'Connected to control server'; };
+  ws.onclose = () => { connEl.className = 'disconnected'; connEl.textContent = 'Disconnected — reconnecting...'; setTimeout(connect, 2000); };
+  ws.onerror = () => { ws.close(); };
+  ws.onmessage = (msg) => {
+    try { handleEvent(JSON.parse(msg.data)); } catch(e) { console.error('Parse error:', e); }
+  };
+}
+
+connect();
+</script>
+</body>
+</html>
