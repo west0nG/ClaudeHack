@@ -11,6 +11,14 @@ You will execute 4 steps in sequence, using the **Agent tool** to launch sub-age
 {{pain_areas}}
 - **Hackathon Theme**: {{theme}}
 
+{{#hackathon_context}}
+## Hackathon Constraints & Criteria
+
+IMPORTANT: All idea cards you produce must respect these constraints and restrictions from the hackathon organizers. Prioritize solutions that score well on the evaluation criteria.
+
+{{hackathon_context}}
+{{/hackathon_context}}
+
 ---
 
 ## Step 1: Template Search Sub-Agent

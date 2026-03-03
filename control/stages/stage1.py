@@ -9,7 +9,7 @@ import shutil
 from pathlib import Path
 
 from control.event_bus import EventBus
-from control.models import CrowdDirection, Event, SessionConfig, SessionResult, SessionStatus
+from control.models import CrowdDirection, Event, HackathonBrief, SessionConfig, SessionResult, SessionStatus
 from control.session_manager import PROJECT_ROOT, SessionManager
 
 logger = logging.getLogger(__name__)
@@ -170,6 +170,8 @@ async def run_stage1(
     session_mgr: SessionManager,
     event_bus: EventBus,
     interests: str | None = None,
+    max_directions: int | None = None,
+    brief: HackathonBrief | None = None,
 ) -> list[Path]:
     """Execute Stage 1: Idea Discovery. Returns paths to final Idea Cards."""
 
@@ -183,6 +185,9 @@ async def run_stage1(
     dedup_input_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Build hackathon context block from brief (empty if simple --theme)
+    hackathon_context = brief.render_context_block() if brief else ""
+
     # ------------------------------------------------------------------
     # Step 1: Main Agent — expand theme into crowd directions
     # ------------------------------------------------------------------
@@ -191,6 +196,7 @@ async def run_stage1(
         _read_prompt("main.md"),
         theme=theme,
         interests=interests or "",
+        hackathon_context=hackathon_context,
     )
 
     main_result = await session_mgr.run_session(SessionConfig(
@@ -209,6 +215,12 @@ async def run_stage1(
     directions = _parse_directions(main_result)
     logger.info("Got %d crowd directions", len(directions))
 
+    # Apply max_directions limit (prioritize high relevance)
+    if max_directions and max_directions < len(directions):
+        directions.sort(key=lambda d: (d.relevance != "high", d.slug))
+        directions = directions[:max_directions]
+        logger.info("Limited to %d directions (max_directions=%d)", len(directions), max_directions)
+
     await event_bus.emit(Event(
         type="directions_found",
         data={"count": len(directions), "directions": [d.slug for d in directions]},
@@ -226,6 +238,7 @@ async def run_stage1(
             theme=theme,
             persona=d.persona,
             pain_areas="\n".join(f"- {pa}" for pa in d.pain_areas),
+            hackathon_context=hackathon_context,
         )
         research_configs.append(SessionConfig(
             session_id=f"research-{d.slug}",
@@ -254,38 +267,48 @@ async def run_stage1(
         await event_bus.emit(Event(type="stage_completed", data={"stage": 1, "cards": 0}))
         return []
 
-    # Copy all cards to dedup input directory
-    for card in all_cards:
-        dest = dedup_input_dir / card.name
-        # Avoid name collisions by prefixing with parent dir name
-        if dest.exists():
-            prefix = card.parent.name
-            dest = dedup_input_dir / f"{prefix}-{card.name}"
-        shutil.copy2(card, dest)
-
-    # ------------------------------------------------------------------
-    # Step 4: Dedup Agent
-    # ------------------------------------------------------------------
-    logger.info("Stage 1 Step 4: Running dedup agent on %d cards", len(all_cards))
-
-    dedup_prompt = _read_prompt("dedup.md")
-    dedup_result = await session_mgr.run_session(SessionConfig(
-        session_id="dedup-agent",
-        prompt=dedup_prompt,
-        working_dir=str(WORKSPACE_DIR / "dedup"),
-        allowed_tools=["Read", "Write", "Glob"],
-        model="sonnet",
-        timeout_seconds=300,
-        max_budget_usd=1.0,
-    ))
-
-    if dedup_result.status != SessionStatus.COMPLETED:
-        logger.warning("Dedup agent failed: %s — using raw cards instead", dedup_result.error)
-        # Fallback: copy raw cards to output
+    # Skip dedup when few cards (saves tokens in single/lite modes)
+    if len(all_cards) <= 3:
+        logger.info("Only %d cards — skipping dedup, copying directly to output", len(all_cards))
         for card in all_cards:
             dest = output_dir / card.name
-            if not dest.exists():
-                shutil.copy2(card, dest)
+            if dest.exists():
+                prefix = card.parent.name
+                dest = output_dir / f"{prefix}-{card.name}"
+            shutil.copy2(card, dest)
+    else:
+        # Copy all cards to dedup input directory
+        for card in all_cards:
+            dest = dedup_input_dir / card.name
+            # Avoid name collisions by prefixing with parent dir name
+            if dest.exists():
+                prefix = card.parent.name
+                dest = dedup_input_dir / f"{prefix}-{card.name}"
+            shutil.copy2(card, dest)
+
+        # ------------------------------------------------------------------
+        # Step 4: Dedup Agent
+        # ------------------------------------------------------------------
+        logger.info("Stage 1 Step 4: Running dedup agent on %d cards", len(all_cards))
+
+        dedup_prompt = _read_prompt("dedup.md")
+        dedup_result = await session_mgr.run_session(SessionConfig(
+            session_id="dedup-agent",
+            prompt=dedup_prompt,
+            working_dir=str(WORKSPACE_DIR / "dedup"),
+            allowed_tools=["Read", "Write", "Glob"],
+            model="sonnet",
+            timeout_seconds=300,
+            max_budget_usd=1.0,
+        ))
+
+        if dedup_result.status != SessionStatus.COMPLETED:
+            logger.warning("Dedup agent failed: %s — using raw cards instead", dedup_result.error)
+            # Fallback: copy raw cards to output
+            for card in all_cards:
+                dest = output_dir / card.name
+                if not dest.exists():
+                    shutil.copy2(card, dest)
 
     # ------------------------------------------------------------------
     # Step 5: Collect final output

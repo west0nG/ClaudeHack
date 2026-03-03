@@ -12,8 +12,15 @@ Hackathon Agent 是一个完全自主的 AI 黑客松参赛系统。它不是辅
 
 ### 1.3 用户输入
 
+支持两种输入模式：
+
+**简单模式**（`--theme`）：
 - **Hackathon 主题约束**（必填）：如 "AI + Climate"、"Crypto"、"Developer Tools" 等
 - **用户感兴趣的方向**（可选）：如 "教育"、"医疗"、"生产力工具" 等。不提供时由 Agent 自主发散
+
+**完整模式**（`--prompt` / `--prompt-file`）：
+- **原始 Hackathon 赛题**：多段落的完整赛题文本，包含规则、约束、评审标准、赞助商奖项等
+- 由 Stage 0（Prompt Interpreter）自动解析为结构化的 `HackathonBrief`，提取主题、约束、限制、评审标准等
 
 ### 1.4 最终产出
 
@@ -30,13 +37,15 @@ Hackathon Agent 是一个完全自主的 AI 黑客松参赛系统。它不是辅
 
 ## 2. 整体架构
 
-### 2.1 三阶段流水线
+### 2.1 四阶段流水线
 
 ```
-用户输入 → [阶段一：需求发现] → [阶段二：PRD 生成] → [阶段三：Demo 开发] → 5-7 个 GitHub 仓库
+用户输入 → [阶段零：赛题解析] → [阶段一：需求发现] → [人工筛选] → [阶段二：PRD 生成] → [阶段三：Demo 开发] → 5-7 个 GitHub 仓库
 ```
 
+- **阶段零**（可选）：解析复杂赛题为结构化 Brief（简单 `--theme` 模式跳过此阶段）
 - **阶段一**：产出 10-20 个 Idea Card
+- **人工筛选**（ReviewGate）：用户在 Dashboard 或 CLI 中选择要保留的 Idea Card
 - **阶段二**：筛选并深化为 5-7 份完整 PRD
 - **阶段三**：并行开发 5-7 个可运行 Demo
 
@@ -47,9 +56,10 @@ Hackathon Agent 是一个完全自主的 AI 黑客松参赛系统。它不是辅
 中控脚本负责：
 
 - **Session 管理** (`SessionManager`)：启动、监控、收集各阶段的 Claude Code CLI session
-- **阶段流转** (`stages/`)：阶段一完成 → 收集 Idea Card → 启动阶段二 → 收集 PRD → 启动阶段三
+- **阶段流转** (`stages/`)：阶段零赛题解析 → 阶段一需求发现 → 人工筛选 → 阶段二 PRD → 阶段三开发
+- **人工筛选** (`ReviewGate`)：阶段间暂停等待用户确认，支持 Dashboard UI 和 CLI 两种模式
 - **事件系统** (`EventBus`)：异步事件发布/订阅，解耦组件
-- **状态广播** (`WebSocketServer`)：通过 WebSocket 向 Dashboard 推送实时状态
+- **状态广播** (`WebSocketServer`)：双向 WebSocket 通信——向 Dashboard 推送状态，接收用户操作（如 ReviewGate 选择）
 
 **编排方式：混合模式**
 - **阶段级编排**由中控脚本驱动（确定性 if/then 逻辑）
@@ -65,9 +75,9 @@ Hackathon Agent 是一个完全自主的 AI 黑客松参赛系统。它不是辅
 - 阶段二：10-20 个并行 PRD session
 - 阶段三：5-7 个并行开发 session
 
-### 2.4 Dashboard（第一版）✅ 已实现
+### 2.4 Dashboard ✅ 已实现
 
-纯观察窗口，不提供用户干预能力。
+同时具备**监控**和**交互**能力的单页面。
 
 展示三个层面的信息：
 
@@ -75,26 +85,79 @@ Hackathon Agent 是一个完全自主的 AI 黑客松参赛系统。它不是辅
 - **Session 视角**：每个 session 的状态卡片（pending / running / completed / failed / retrying），显示实时活动摘要
 - **关键事件流**：右侧时间线形式展示所有事件
 
-技术实现：单文件 `dashboard.html`（vanilla JS + WebSocket），无构建工具，直接浏览器打开。连接 `ws://localhost:8765`，支持断线自动重连，新连接自动接收历史事件。
+交互能力：
+
+- **ReviewGate 面板**：阶段一完成后自动弹出，展示 Idea Card 摘要（标题、场景片段、证据数量、解决方向），支持勾选/取消勾选，全选/全不选，确认后通过 WebSocket 回传选择结果
+
+技术实现：单文件 `dashboard.html`（vanilla JS + WebSocket），无构建工具，直接浏览器打开。双向 WebSocket 通信（`ws://localhost:8765`），支持断线自动重连，新连接自动接收历史事件。
 
 ---
 
-## 3. 阶段一：需求发现
+## 3. 阶段零：赛题解析（Stage 0）✅ 已实现
 
 ### 3.1 目标
 
+将复杂的 Hackathon 赛题文本解析为结构化的 `HackathonBrief`，供后续阶段使用。
+
+### 3.2 触发条件
+
+- 使用 `--prompt` 或 `--prompt-file` 输入时触发
+- 使用 `--theme` 简单模式时**跳过**，直接生成最小 `HackathonBrief`（只含 theme 字段）
+
+### 3.3 数据模型：HackathonBrief
+
+```python
+@dataclass
+class HackathonBrief:
+    theme: str                       # "AI + Education"
+    theme_description: str           # 2-3 句描述
+    constraints: list[str]           # 硬性约束（"必须使用 X API"）
+    evaluation_criteria: list[str]   # 评审标准及权重
+    restrictions: list[str]          # 明确禁止项
+    special_requirements: list[str]  # 赞助商奖项、特殊赛道
+    suggested_directions: list[str]  # 赛题建议的探索方向
+    raw_prompt: str                  # 原始赛题文本
+    time_limit: str | None           # 比赛时长
+    team_size: str | None            # 团队规模
+    target_audience: str | None      # 目标受众
+```
+
+### 3.4 流程
+
+```
+原始赛题文本 (--prompt / --prompt-file)
+    ↓
+[Interpreter Session] ── claude -p → 输出 JSON: HackathonBrief
+    ↓
+中控解析 JSON → 构建 HackathonBrief 对象
+    ↓
+Brief 的 constraints/criteria/restrictions 渲染为文本块
+    ↓
+注入阶段一的 main.md 和 research.md（通过 {{#hackathon_context}} 条件块）
+```
+
+### 3.5 约束传递
+
+`HackathonBrief.render_context_block()` 将约束、评审标准、限制渲染为人类可读的文本块，通过模板条件块 `{{#hackathon_context}}...{{/hackathon_context}}` 注入阶段一的 Prompt。当使用简单 `--theme` 模式时，`hackathon_context` 为空字符串，条件块被移除。
+
+---
+
+## 4. 阶段一：需求发现
+
+### 4.1 目标
+
 从 hackathon 主题出发，自主发现真实用户痛点，产出 10-20 个有证据支撑的 Idea Card。
 
-### 3.2 核心设计原则
+### 4.2 核心设计原则
 
 - Agent 没有"身体性"和生活经验，因此必须先**选人群**（模拟谁的视角），再找痛点
 - 聚焦**真实用户痛点**路线，不走"做有趣的东西"路线
 - 寻找的是"痛点假设"而非"已验证的痛点"——有证据支撑即可，不需要百分百确认
 - 只做筛选（淘汰明显不行的），不做挑选（不主观排序）
 
-### 3.3 Agent 编排
+### 4.3 Agent 编排
 
-#### 3.3.1 主 Agent
+#### 4.3.1 主 Agent
 
 由一个 Claude Code session 完成以下工作：
 
@@ -109,7 +172,7 @@ Hackathon Agent 是一个完全自主的 AI 黑客松参赛系统。它不是辅
 
 此步骤不需要搜索，靠 Agent 自身知识完成。
 
-#### 3.3.2 Research Sessions（每个人群方向 × 1）✅ 已实现
+#### 4.3.2 Research Sessions（每个人群方向 × 1）✅ 已实现
 
 **实现决策变更**：原设计为中控分别启动 2 research + 1 critic 共 3 个 session。实际实现改为每个方向启动 **1 个 Research session**，session 内部通过 Claude Code 的 **Agent tool** 自行 spawn 3 个 sub-agent：
 
@@ -132,16 +195,32 @@ Hackathon Agent 是一个完全自主的 AI 黑客松参赛系统。它不是辅
 
 每个 Research session 产出 1-3 个 `idea-card-*.md` 文件。
 
-#### 3.3.3 去重 Agent ✅ 已实现
+#### 4.3.3 去重 Agent ✅ 已实现
 
 独立的 Dedup session（`prompts/stage1/dedup.md`）：
 
 - 读取所有 Research session 产出的 Idea Card（中控复制到 `dedup/input/`）
 - 合并重复、淘汰证据不足的
-- 按质量排名输出到 `workspace/stage1/output/`
 - 如果 Dedup session 失败，中控会 fallback 使用 raw cards
 
-### 3.4 Session 规模（实际）
+### 4.4 运行模式 ✅ 已实现
+
+支持三种运行模式，通过 `--mode` 控制：
+
+| 模式 | 行为 | 用途 |
+|------|------|------|
+| `full`（默认）| 所有方向并行研究 | 生产环境 |
+| `single` | 只取 1 个方向 | 开发测试，节省约 80% tokens |
+| `lite` | 所有方向串行执行 | 调试 |
+
+另外支持 `--max-directions N` 精确控制方向数量。
+
+**方向裁剪逻辑**：
+- 优先保留 `relevance: "high"` 的方向
+- 同优先级按 slug 字母序排序
+- 裁剪后方向数 <= 3 时，跳过 Dedup Agent（卡片太少没必要去重）
+
+### 4.5 Session 规模（实际）
 
 假设 7 个人群方向：
 - 1 个主 Agent session
@@ -149,13 +228,50 @@ Hackathon Agent 是一个完全自主的 AI 黑客松参赛系统。它不是辅
 - 1 个 Dedup session
 - 共 9 个 Claude Code sessions（最多 5 个并行，由 Semaphore 控制）
 
-### 3.5 阶段一产出
+### 4.6 阶段一产出
 
 10-20 个标准格式的 Idea Card 文件，存放于汇总目录。
 
 ---
 
-## 4. 中间产物：Idea Card 格式
+## 5. 人工筛选：ReviewGate ✅ 已实现
+
+### 5.1 目标
+
+阶段一完成后暂停流水线，让人类审查 Idea Card 并决定哪些进入阶段二。
+
+### 5.2 设计理由
+
+AI 可能高估某些想法的可行性——人类一眼就能看出的不靠谱点，AI 往往信心满满地通过。增加人工筛选可以在早期阶段避免浪费后续大量 token。
+
+### 5.3 两种交互模式
+
+**Dashboard 模式**（默认）：
+- 阶段一完成后，中控发送 `review_requested` 事件
+- Dashboard 自动展示 Review 面板：卡片网格，每张卡显示标题、场景摘要（150 字）、证据数量、解决方向
+- 每张卡默认勾选，用户取消勾选不需要的卡片
+- 点击 "Confirm Selection" → 通过 WebSocket 回传 `{type: "review_selection", selected_indices: [0,1,3]}`
+- 中控收到选择后恢复流水线
+
+**CLI 模式**（`--no-dashboard` 时）：
+- 在终端打印卡片编号和摘要
+- 用户输入逗号分隔的编号（如 `0,1,3`）或 `all`
+- 超时 10 分钟自动保留全部卡片
+
+### 5.4 跳过筛选
+
+`--skip-review` 跳过 ReviewGate，自动保留所有卡片（用于全自动运行）。
+
+### 5.5 事件
+
+| 事件 | 触发时机 | data 字段 |
+|------|----------|-----------|
+| `review_requested` | 卡片就绪等待审查 | `{cards: [{index, title, scenario_excerpt, evidence_count, solution_directions}]}` |
+| `review_completed` | 用户确认选择 | `{selected: int, total: int}` |
+
+---
+
+## 6. 中间产物：Idea Card 格式
 
 ```markdown
 # Idea Card: [简短标题]
@@ -191,30 +307,30 @@ Hackathon Agent 是一个完全自主的 AI 黑客松参赛系统。它不是辅
 
 ---
 
-## 5. 阶段二：PRD 生成
+## 7. 阶段二：PRD 生成
 
-### 5.1 目标
+### 7.1 目标
 
 对 10-20 个 Idea Card 并行深入，淘汰不可行的，为存活的 5-7 个各自生成完整的 PRD。
 
-### 5.2 核心设计原则
+### 7.2 核心设计原则
 
 - 每个 Idea Card 由一组**完全独立**的 sub-agent 处理，Idea Card 之间无交互
 - 只做筛选，不做挑选——淘汰明显不可行的，剩余全部保留并生成 PRD
 - 如果 5-7 个都能产出完整 PRD，就同时全部进入阶段三
 - PRD 产出两份：给开发 Agent 的结构化 Markdown + 给用户的附带 HTML 线框图
 
-### 5.3 Agent 编排
+### 7.3 Agent 编排
 
 每个 Idea Card 由以下五个角色的 sub-agent 协作处理：
 
-#### 5.3.1 Product Agent
+#### 7.3.1 Product Agent
 
 - 读取 Idea Card，从 2-3 个解决方向中选择或组合出最优方案
 - 定义产品是什么、核心功能有哪些
 - 设计演示路径的逐屏描述
 
-#### 5.3.2 Technical Agent
+#### 7.3.2 Technical Agent
 
 - 评估 Product Agent 方案的技术可行性
 - 确定技术栈（默认偏向 React + Vite + Tailwind 等快速出原型的选择）
@@ -222,7 +338,7 @@ Hackathon Agent 是一个完全自主的 AI 黑客松参赛系统。它不是辅
 
 与 Product Agent 之间存在**小循环**（1-2 轮）：如果某功能技术上做不了或太复杂，反馈给 Product Agent 调整方案。
 
-#### 5.3.3 Critic Agent
+#### 7.3.3 Critic Agent
 
 - 审视方案是否真的解决了 Idea Card 中的痛点
 - 检查逻辑漏洞、是否把简单问题搞复杂
@@ -230,7 +346,7 @@ Hackathon Agent 是一个完全自主的 AI 黑客松参赛系统。它不是辅
 
 与 Product Agent 之间存在**循环**（最多 1-2 轮）。如果连续打回两次以上，标记该 Idea 为不可行，直接淘汰。
 
-#### 5.3.4 Pitch Agent
+#### 7.3.4 Pitch Agent
 
 - 从演示效果角度审视整个方案
 - 评估 wow moment 在哪里、叙事线是否清晰
@@ -239,14 +355,14 @@ Hackathon Agent 是一个完全自主的 AI 黑客松参赛系统。它不是辅
 
 反馈交给 Product Agent 做**最后一轮微调**。
 
-#### 5.3.5 Wireframe Agent
+#### 7.3.5 Wireframe Agent
 
 - 在方案完全确定后介入
 - 根据最终逐屏描述生成简单的 HTML 线框图
 - 灰色方块级别，只需让用户看到布局和交互流程
 - 纯执行，无循环
 
-### 5.4 执行顺序与循环
+### 7.4 执行顺序与循环
 
 ```
 Product Agent
@@ -262,7 +378,7 @@ Wireframe Agent → 生成线框图 (无循环)
 
 总共约 3-5 轮交互。
 
-### 5.5 淘汰机制
+### 7.5 淘汰机制
 
 以下情况自然淘汰：
 
@@ -271,7 +387,7 @@ Wireframe Agent → 生成线框图 (无循环)
 - 深入后发现痛点实为伪需求
 - Critic 连续打回两次以上
 
-### 5.6 阶段二产出
+### 7.6 阶段二产出
 
 每个存活的 Idea 产出：
 
@@ -280,7 +396,7 @@ Wireframe Agent → 生成线框图 (无循环)
 
 ---
 
-## 6. 中间产物：PRD 格式
+## 8. 中间产物：PRD 格式
 
 ```markdown
 # PRD: [产品名称]
@@ -368,21 +484,21 @@ project/
 
 ---
 
-## 7. 阶段三：Demo 开发
+## 9. 阶段三：Demo 开发
 
-### 7.1 目标
+### 9.1 目标
 
 将 5-7 份 PRD 并行开发为可运行的 Demo，每个项目产出一个完整的、演示路径能跑通的应用。
 
-### 7.2 核心设计原则
+### 9.2 核心设计原则
 
 - **Demo 优先原则**：能用 mock 数据就不接真实 API；能硬编码就不做配置化；不做边界情况处理；不做用户体系；只实现演示路径上的功能
 - 核心功能必须真正 work，纯静态页面不够
 - 5-7 个项目完全独立，各起独立 Claude Code session，不需要任何协调
 
-### 7.3 Agent 编排（单个项目内部）
+### 9.3 Agent 编排（单个项目内部）
 
-#### 7.3.1 Planner Sub-agent
+#### 9.3.1 Planner Sub-agent
 
 在最开始工作一次，读取 PRD 产出开发计划：
 
@@ -393,7 +509,7 @@ project/
 
 完成后即结束。
 
-#### 7.3.2 Orchestrator（主 Agent）
+#### 9.3.2 Orchestrator（主 Agent）
 
 拿着 Planner 的开发计划执行：
 
@@ -404,7 +520,7 @@ project/
 
 骨架保持最简：路由、空页面、全局样式即可，不过度预制组件。
 
-#### 7.3.3 Coding Sub-agents
+#### 9.3.3 Coding Sub-agents
 
 按屏幕分配，每个 sub-agent 负责一整屏的所有内容。
 
@@ -422,19 +538,19 @@ project/
 - 全局样式和公共组件
 - 前置屏幕的接口定义/数据结构（如果有依赖）
 
-#### 7.3.4 Designer Agent
+#### 9.3.4 Designer Agent
 
 - 参与骨架阶段定义设计系统（颜色、字体、间距、组件样式）
 - 各屏完成后检查视觉一致性
 - 关注点与 Reviewer 不同：Reviewer 看功能和逻辑，Designer 看视觉和体验
 
-#### 7.3.5 Reviewer Agent
+#### 9.3.5 Reviewer Agent
 
 - 每个屏幕完成后做**屏幕级检查**：是否符合 PRD、样式是否一致、接口是否对齐
 - 所有屏幕完成后做**集成检查**：沿演示路径从头到尾跑一遍，确认整条链路通畅
 - 发现问题打回 Coding Agent 修复
 
-### 7.4 三层循环机制
+### 9.4 三层循环机制
 
 #### 最内层：Coding Agent 自修复循环
 
@@ -460,7 +576,7 @@ project/
 
 **关键原则：循环范围尽量小。** 哪里出问题就在哪里循环，不轻易重跑整个流程。
 
-### 7.5 执行顺序
+### 9.5 执行顺序
 
 ```
 Planner → 产出开发计划
@@ -485,9 +601,9 @@ Demo 完成
 
 ---
 
-## 8. 技术实现方案
+## 10. 技术实现方案
 
-### 8.1 技术栈选择 ✅ 已确定
+### 10.1 技术栈选择 ✅ 已确定
 
 - **中控脚本**：Python 3.11+ (asyncio)
 - **Dashboard**：单文件 `dashboard.html`（vanilla JS + WebSocket，无构建工具）
@@ -496,20 +612,22 @@ Demo 完成
 - **依赖**：websockets, aiofiles
 - **Python 环境**：`.venv/` (venv)
 
-### 8.2 中控脚本职责
+### 10.2 中控脚本职责
 
 ```
-1. 读取用户输入（hackathon 主题 + 可选方向）
+1. 解析 CLI 参数（--theme / --prompt / --prompt-file + --mode 等）
 2. 启动 EventBus + WebSocketServer
-3. 启动阶段一主 Agent session → 获取人群方向 JSON
-4. 为每个人群方向启动 1 个 Research session（内部自行 spawn sub-agents）
-5. 等待所有 session 完成 → 收集 Idea Card → 复制到 dedup/input/
-6. 启动 Dedup session → 去重和质量过滤
-7. 收集最终产出 → workspace/stage1/output/
-8. 全程通过 EventBus → WebSocket 向 Dashboard 推送状态
+3. [可选] Stage 0: 解析复杂赛题 → 构建 HackathonBrief
+4. Stage 1: 启动主 Agent session → 获取人群方向 JSON
+5. [可选] 按 max_directions 裁剪方向
+6. 为每个方向启动 Research session（内部 spawn sub-agents）
+7. 收集 Idea Card → 卡片数 <= 3 跳过去重，否则启动 Dedup session
+8. [可选] ReviewGate: 暂停等待用户筛选（Dashboard UI 或 CLI）
+9. 收集筛选后的最终产出 → workspace/stage1/output/
+10. 全程通过 EventBus → WebSocket 双向通信 Dashboard
 ```
 
-### 8.3 Session 管理 ✅ 已实现
+### 10.3 Session 管理 ✅ 已实现
 
 - 每个 session 有独立的工作目录 (`workspace/stage1/research-{slug}/`)
 - `SessionManager` 用 `asyncio.Semaphore(5)` 控制并发
@@ -518,7 +636,7 @@ Demo 完成
 - Session 异常处理：超时 kill + 最多重试 1 次
 - 失败 fallback：Dedup 失败时使用 raw cards
 
-### 8.4 文件系统结构 ✅ 已实现
+### 10.4 文件系统结构 ✅ 已实现
 
 ```
 hackathon-agent/
@@ -526,20 +644,24 @@ hackathon-agent/
 │   ├── __init__.py
 │   ├── __main__.py              # python -m control 入口
 │   ├── main.py                  # CLI 入口 + 组件编排
-│   ├── models.py                # 数据模型
+│   ├── models.py                # 数据模型 (SessionConfig, SessionResult, Event, HackathonBrief, ...)
 │   ├── event_bus.py             # 异步事件 pub/sub
 │   ├── session_manager.py       # 核心：管理 claude CLI 子进程
-│   ├── ws_server.py             # WebSocket 服务端
+│   ├── ws_server.py             # WebSocket 服务端（双向通信）
+│   ├── review_gate.py           # ReviewGate: 阶段间人工筛选
 │   └── stages/
 │       ├── __init__.py
+│       ├── stage0.py            # 阶段零：赛题解析
 │       └── stage1.py            # 阶段一完整逻辑
 │
-├── dashboard.html               # 单文件监控页面
+├── dashboard.html               # 单文件监控 + 交互页面（含 ReviewGate UI）
 │
 ├── prompts/                     # 各角色 Agent 的 Prompt
+│   ├── stage0/                  # ✅ 已实现
+│   │   └── interpreter.md       # 赛题解析 Agent
 │   ├── stage1/                  # ✅ 已实现
-│   │   ├── main.md              # 主 Agent: 人群展开 → JSON
-│   │   ├── research.md          # Research: 内部 Agent tool 管理 3 sub-agents
+│   │   ├── main.md              # 主 Agent: 人群展开 → JSON（含 hackathon_context 条件块）
+│   │   ├── research.md          # Research: 内部 Agent tool 管理 3 sub-agents（含 hackathon_context 条件块）
 │   │   └── dedup.md             # 去重 + 质量过滤
 │   ├── stage2/                  # ⬜ 待实现
 │   │   ├── product.md
@@ -558,6 +680,8 @@ hackathon-agent/
 │   └── idea-card.md             # ✅ Idea Card 模板
 │
 ├── workspace/                   # 运行时工作空间 (gitignored)
+│   ├── stage0/
+│   │   └── interpreter/         # Stage 0 工作目录
 │   └── stage1/
 │       ├── main/                # 主 Agent 工作目录
 │       ├── research-{slug}/     # 各 Research Session 工作目录
@@ -567,21 +691,24 @@ hackathon-agent/
 ├── .venv/                       # Python 虚拟环境
 ├── requirements.txt
 ├── .gitignore
-└── CLAUDE.md
+├── CLAUDE.md
+└── Hackathon Agent Design.md
 ```
 
 ---
 
-## 9. Agent 角色总览
+## 11. Agent 角色总览
 
 | 阶段 | 角色 | 数量 | 职责 | 形式 |
 |------|------|------|------|------|
+| 零 | Interpreter | 0-1 | 解析复杂赛题为结构化 Brief | Claude Code session |
 | 一 | 主 Agent | 1 | 人群展开、粗筛 → JSON 输出 | Claude Code session |
 | 一 | Research | 每人群 1 个 | 内部管理模板搜索+自由搜索+Critic sub-agents | Claude Code session |
 | 一 | ├ 模板搜索 | (内部) | 结构化关键词搜索痛点 | Agent tool sub-agent |
 | 一 | ├ 自由搜索 | (内部) | 开放式探索发现痛点 | Agent tool sub-agent |
 | 一 | └ Critic | (内部) | 质疑痛点真实性、评估证据 | Agent tool sub-agent |
-| 一 | Dedup Agent | 1 | 去重、质量过滤、排名 | Claude Code session |
+| 一 | Dedup Agent | 0-1 | 去重、质量过滤、排名（卡片 ≤3 时跳过）| Claude Code session |
+| — | ReviewGate | — | 人工筛选 Idea Card（非 Agent，中控组件）| Dashboard UI / CLI |
 | 二 | Product | 每 Idea 1 个 | 方案设计、演示路径规划 | Sub-agent |
 | 二 | Technical | 每 Idea 1 个 | 技术可行性、技术方案 | Sub-agent |
 | 二 | Critic | 每 Idea 1 个 | 方案合理性审查 | Sub-agent |
@@ -595,9 +722,9 @@ hackathon-agent/
 
 ---
 
-## 10. 循环与容错机制总览
+## 12. 循环与容错机制总览
 
-### 10.1 阶段一
+### 12.1 阶段一
 
 | 循环 | 参与角色 | 轮次上限 | 触发条件 |
 |------|----------|----------|----------|
@@ -605,7 +732,7 @@ hackathon-agent/
 
 失败处理：Critic 质疑后 Research 无法有效回应 → 该 Idea Card 自然淘汰
 
-### 10.2 阶段二
+### 12.2 阶段二
 
 | 循环 | 参与角色 | 轮次上限 | 触发条件 |
 |------|----------|----------|----------|
@@ -615,7 +742,7 @@ hackathon-agent/
 
 失败处理：Critic 连续打回 2 次以上 → 标记 Idea 为不可行，淘汰
 
-### 10.3 阶段三
+### 12.3 阶段三
 
 | 循环层级 | 参与角色 | 轮次上限 | 处理范围 |
 |----------|----------|----------|----------|
@@ -627,38 +754,41 @@ hackathon-agent/
 
 ---
 
-## 11. Token 消耗预估
+## 13. Token 消耗预估
 
-### 11.1 阶段一
+### 13.1 阶段零
+- Interpreter：0-1 session，轻量级，约 5K-10K tokens（简单 `--theme` 模式跳过）
+
+### 13.2 阶段一
 - 主 Agent：1 session，轻量级，约 10K-20K tokens
 - Research sessions：约 14 个，每个含搜索和内容分析，约 50K-100K tokens/session
 - Critic sessions：约 7 个，每个约 20K-30K tokens/session
 - **阶段一预估总计**：约 1M-2M tokens
 
-### 11.2 阶段二
+### 13.3 阶段二
 - PRD sessions：约 10-20 个，每个含 5 个角色的多轮交互，约 100K-200K tokens/session
 - **阶段二预估总计**：约 1.5M-4M tokens
 
-### 11.3 阶段三
+### 13.4 阶段三
 - 开发 sessions：5-7 个，每个含完整的开发循环，约 500K-1M tokens/session
 - **阶段三预估总计**：约 3M-7M tokens
 
-### 11.4 总计
+### 13.5 总计
 - **整体预估**：约 5M-13M tokens
 - 以上为粗略估算，实际消耗取决于项目复杂度、循环次数、搜索深度等因素
 
 ---
 
-## 12. 待定与后续迭代项
+## 14. 待定与后续迭代项
 
-### 12.1 第一版不做，后续迭代
+### 14.1 第一版不做，后续迭代
 
-- 用户干预机制（暂停、提问、修改方向）
+- ~~用户干预机制（暂停、提问、修改方向）~~ → **已部分实现**（ReviewGate 提供阶段间人工筛选）
 - Presentation / Pitch Deck 自动生成（原计划的第四阶段）
 - 智能 token 预算管理
 - 项目间经验学习（一个项目的成功模式应用到其他项目）
 
-### 12.2 需要在实现中验证和调整
+### 14.2 需要在实现中验证和调整
 
 - 各角色 Agent 的 Prompt 具体内容
 - 循环次数上限的最优值
@@ -669,7 +799,7 @@ hackathon-agent/
 
 ---
 
-## 13. 设计决策记录
+## 15. 设计决策记录
 
 ### 原始设计决策
 
@@ -700,3 +830,19 @@ hackathon-agent/
 | 超时策略 | 主 Agent 120s / Research 900s / Dedup 300s | 按任务复杂度分配 |
 | 重试策略 | 最多 1 次重试 | 简单可靠，避免浪费 token |
 | Dedup 失败 fallback | 使用 raw cards | 宁可多不可少 |
+
+### Phase 1.5 增强决策
+
+| 决策 | 选择 | 理由 |
+|------|------|------|
+| 运行模式 | `--mode full/single/lite` + `--max-directions` | 开发测试时节省 token，生产环境全量运行 |
+| 方向裁剪策略 | 优先保留 high relevance | 确保测试时选到最有价值的方向 |
+| 少量卡片跳过 Dedup | 卡片 ≤3 时直接跳过 | 没必要为 1-3 张卡启动额外 session |
+| 赛题解析 | 独立 Stage 0 session | 结构化提取约束/评审标准，避免信息丢失 |
+| 简单模式跳过 Stage 0 | `--theme` 直接创建最小 Brief | 向后兼容，无需额外开销 |
+| 约束注入方式 | `{{#hackathon_context}}` 条件块 | 简单模式时块被移除，零侵入 |
+| 人工筛选位置 | 阶段一和阶段二之间 | 最早介入点，避免为不靠谱的 Idea 浪费 PRD token |
+| ReviewGate 交互 | Dashboard 优先 + CLI 回退 | 有 Dashboard 时体验好，CLI 作为兜底 |
+| ReviewGate 默认行为 | 所有卡片默认勾选 | 符合"只淘汰不挑选"原则，用户减法操作 |
+| ReviewGate 超时 | 10 分钟超时保留全部 | 安全兜底，避免无人值守时管道卡住 |
+| WebSocket 双向通信 | `register_handler()` 消息分发 | 最小改动支持回传，不引入额外依赖 |

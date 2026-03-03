@@ -9,6 +9,14 @@ You do NOT search the web. You rely on your own knowledge to generate diverse, w
 - **Hackathon Theme**: {{theme}}
 {{#interests}}- **Interest Areas** (optional hints from the user): {{interests}}{{/interests}}
 
+{{#hackathon_context}}
+## Hackathon Constraints & Criteria
+
+The following constraints, evaluation criteria, and restrictions come directly from the hackathon organizers. Your crowd directions MUST respect all hard constraints and restrictions. Prefer directions that align with the evaluation criteria.
+
+{{hackathon_context}}
+{{/hackathon_context}}
+
 ---
 
 ## What Makes a Good Crowd Direction

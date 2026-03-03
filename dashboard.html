@@ -43,6 +43,33 @@
 
   .disconnected { color: #f85149; font-style: italic; margin-bottom: 12px; }
   .connected { color: #3fb950; margin-bottom: 12px; font-size: 0.85em; }
+
+  /* Review panel */
+  #review-panel { display: none; margin-bottom: 20px; padding: 16px; background: #161b22; border: 2px solid #d29922; border-radius: 8px; }
+  #review-panel.active { display: block; }
+  #review-panel h2 { color: #d29922; font-size: 1.1em; margin-bottom: 4px; }
+  #review-panel .review-subtitle { color: #8b949e; font-size: 0.85em; margin-bottom: 14px; }
+  .review-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .review-card { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 12px; cursor: pointer; transition: border-color 0.15s; position: relative; }
+  .review-card:hover { border-color: #58a6ff; }
+  .review-card.selected { border-color: #3fb950; background: #3fb95008; }
+  .review-card .rc-checkbox { position: absolute; top: 12px; right: 12px; width: 18px; height: 18px; border: 2px solid #30363d; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+  .review-card.selected .rc-checkbox { border-color: #3fb950; background: #3fb950; color: #0d1117; }
+  .review-card .rc-title { font-weight: 600; font-size: 0.95em; color: #c9d1d9; padding-right: 28px; margin-bottom: 6px; }
+  .review-card .rc-scenario { font-size: 0.8em; color: #8b949e; margin-bottom: 8px; line-height: 1.4; }
+  .review-card .rc-meta { font-size: 0.75em; color: #484f58; }
+  .review-card .rc-meta span { margin-right: 12px; }
+  .review-actions { display: flex; gap: 10px; align-items: center; }
+  .review-actions button { padding: 8px 20px; border-radius: 6px; border: none; cursor: pointer; font-weight: 600; font-size: 0.9em; }
+  #btn-confirm { background: #238636; color: #fff; }
+  #btn-confirm:hover { background: #2ea043; }
+  #btn-select-all { background: #30363d; color: #c9d1d9; }
+  #btn-select-all:hover { background: #484f58; }
+  #btn-select-none { background: #30363d; color: #c9d1d9; }
+  #btn-select-none:hover { background: #484f58; }
+  .review-count { color: #8b949e; font-size: 0.85em; margin-left: 8px; }
+  #review-panel.confirmed { border-color: #3fb950; opacity: 0.6; pointer-events: none; }
+  #review-panel.confirmed h2 { color: #3fb950; }
 </style>
 </head>
 <body>
@@ -60,6 +87,19 @@
   <div class="stat"><span class="stat-label">Idea Cards</span><span class="stat-value" id="s-cards" style="color:#d2a8ff">0</span></div>
 </div>
 
+<!-- Review Gate Panel (hidden by default) -->
+<div id="review-panel">
+  <h2>Review Gate: Select Idea Cards</h2>
+  <div class="review-subtitle">Stage 1 is complete. Review the cards below, deselect any you want to drop, then confirm.</div>
+  <div class="review-cards" id="review-cards"></div>
+  <div class="review-actions">
+    <button id="btn-confirm" onclick="confirmReview()">Confirm Selection</button>
+    <button id="btn-select-all" onclick="selectAll()">Select All</button>
+    <button id="btn-select-none" onclick="selectNone()">Select None</button>
+    <span class="review-count" id="review-count"></span>
+  </div>
+</div>
+
 <div class="columns">
   <div class="col-sessions">
     <div class="section-title">Sessions</div>
@@ -75,6 +115,8 @@
 const WS_URL = 'ws://localhost:8765';
 const sessions = {};  // session_id -> {status, activity, logs[]}
 let totalCompleted = 0, totalFailed = 0, totalCards = 0;
+let wsConnection = null;
+let reviewCards = [];  // card summaries from review_requested
 
 function fmtTime(ts) {
   const d = new Date(ts * 1000);
@@ -143,6 +185,81 @@ function addEvent(type, text, ts) {
 
 function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
+// ---- Review Panel Logic ----
+
+function showReviewPanel(cards) {
+  reviewCards = cards;
+  const container = document.getElementById('review-cards');
+  container.innerHTML = '';
+
+  cards.forEach((card, i) => {
+    const el = document.createElement('div');
+    el.className = 'review-card selected';
+    el.dataset.index = card.index;
+    el.onclick = () => toggleCard(el);
+    el.innerHTML = `
+      <div class="rc-checkbox">&#10003;</div>
+      <div class="rc-title">${escHtml(card.title)}</div>
+      <div class="rc-scenario">${escHtml(card.scenario_excerpt || '')}</div>
+      <div class="rc-meta">
+        <span>Evidence: ${card.evidence_count} sources</span>
+        <span>Directions: ${(card.solution_directions || []).join(', ') || 'N/A'}</span>
+      </div>
+    `;
+    container.appendChild(el);
+  });
+
+  document.getElementById('review-panel').classList.add('active');
+  updateReviewCount();
+}
+
+function toggleCard(el) {
+  el.classList.toggle('selected');
+  updateReviewCount();
+}
+
+function selectAll() {
+  document.querySelectorAll('.review-card').forEach(el => el.classList.add('selected'));
+  updateReviewCount();
+}
+
+function selectNone() {
+  document.querySelectorAll('.review-card').forEach(el => el.classList.remove('selected'));
+  updateReviewCount();
+}
+
+function updateReviewCount() {
+  const selected = document.querySelectorAll('.review-card.selected').length;
+  const total = document.querySelectorAll('.review-card').length;
+  document.getElementById('review-count').textContent = `${selected} / ${total} selected`;
+}
+
+function confirmReview() {
+  const selectedIndices = [];
+  document.querySelectorAll('.review-card.selected').forEach(el => {
+    selectedIndices.push(parseInt(el.dataset.index));
+  });
+
+  if (selectedIndices.length === 0) {
+    if (!confirm('No cards selected. This will produce an empty result. Continue?')) return;
+  }
+
+  // Send selection back to server
+  if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+    wsConnection.send(JSON.stringify({
+      type: 'review_selection',
+      selected_indices: selectedIndices,
+    }));
+  }
+
+  // Visual confirmation
+  document.getElementById('review-panel').classList.add('confirmed');
+  document.querySelector('#review-panel h2').textContent =
+    `Review Complete: ${selectedIndices.length} cards selected`;
+}
+
+// ---- Event Handling ----
+
 function handleEvent(ev) {
   const { type, data, timestamp } = ev;
   const ts = timestamp || Date.now() / 1000;
@@ -199,11 +316,24 @@ function handleEvent(ev) {
   else if (type === 'directions_found') {
     addEvent('info', `Found ${data.count} crowd directions: ${(data.directions||[]).join(', ')}`, ts);
   }
+  else if (type === 'review_requested') {
+    showReviewPanel(data.cards || []);
+  }
+  else if (type === 'review_completed') {
+    // Ensure panel shows confirmed state
+    const panel = document.getElementById('review-panel');
+    if (!panel.classList.contains('confirmed')) {
+      panel.classList.add('confirmed');
+      document.querySelector('#review-panel h2').textContent =
+        `Review Complete: ${data.selected} / ${data.total} cards selected`;
+    }
+  }
 }
 
 // WebSocket connection with auto-reconnect
 function connect() {
   const ws = new WebSocket(WS_URL);
+  wsConnection = ws;
   const connEl = document.getElementById('conn-status');
 
   ws.onopen = () => { connEl.className = 'connected'; connEl.textContent = 'Connected to control server'; };
