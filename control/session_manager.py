@@ -36,7 +36,7 @@ class SessionManager:
                     "session_retrying",
                     {"session_id": config.session_id, "attempt": attempt + 1},
                 )
-            result = await self._run_once(config)
+            result = await self._run_once(config, emit_started=(attempt == 0))
             if result.status == SessionStatus.COMPLETED:
                 return result
             last_error = result.error
@@ -48,30 +48,52 @@ class SessionManager:
             error=last_error or "All retries exhausted",
         )
 
+    async def run_session_bounded(self, config: SessionConfig) -> SessionResult:
+        """Run a single session, bounded by the global concurrency semaphore.
+
+        Unlike run_session(), releases the semaphore between retry attempts
+        so other sessions can proceed while this one waits to retry.
+        """
+        last_error: str | None = None
+        for attempt in range(config.max_retries + 1):
+            if attempt > 0:
+                await self._emit(
+                    "session_retrying",
+                    {"session_id": config.session_id, "attempt": attempt + 1},
+                )
+            async with self._semaphore:
+                result = await self._run_once(config, emit_started=(attempt == 0))
+            if result.status == SessionStatus.COMPLETED:
+                return result
+            last_error = result.error
+
+        return SessionResult(
+            session_id=config.session_id,
+            status=SessionStatus.FAILED,
+            error=last_error or "All retries exhausted",
+        )
+
     async def run_many(self, configs: list[SessionConfig]) -> list[SessionResult]:
         """Run multiple sessions with concurrency control."""
-        tasks = [self._run_with_semaphore(cfg) for cfg in configs]
+        tasks = [self.run_session_bounded(cfg) for cfg in configs]
         return await asyncio.gather(*tasks)
 
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
-    async def _run_with_semaphore(self, config: SessionConfig) -> SessionResult:
-        async with self._semaphore:
-            return await self.run_session(config)
-
-    async def _run_once(self, config: SessionConfig) -> SessionResult:
+    async def _run_once(self, config: SessionConfig, emit_started: bool = True) -> SessionResult:
         work_dir = self._resolve_working_dir(config.working_dir)
         work_dir.mkdir(parents=True, exist_ok=True)
 
         cmd = self._build_command(config)
         logger.info("[%s] Starting: %s", config.session_id, " ".join(cmd))
 
-        await self._emit(
-            "session_started",
-            {"session_id": config.session_id, "model": config.model},
-        )
+        if emit_started:
+            await self._emit(
+                "session_started",
+                {"session_id": config.session_id, "model": config.model},
+            )
 
         # Allow launching claude CLI from within a Claude Code session
         env = os.environ.copy()

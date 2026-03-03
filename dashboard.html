@@ -70,6 +70,30 @@
   .review-count { color: #8b949e; font-size: 0.85em; margin-left: 8px; }
   #review-panel.confirmed { border-color: #3fb950; opacity: 0.6; pointer-events: none; }
   #review-panel.confirmed h2 { color: #3fb950; }
+
+  /* Per-card review queue */
+  .review-queue { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+  .queue-card { display: flex; align-items: center; gap: 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 10px 14px; transition: border-color 0.15s, opacity 0.2s; }
+  .queue-card.active { border-color: #d29922; background: #d299220a; }
+  .queue-card.approved { border-color: #3fb950; opacity: 0.7; }
+  .queue-card.approved .qc-status { color: #3fb950; }
+  .queue-card.rejected { border-color: #f85149; opacity: 0.5; }
+  .queue-card.rejected .qc-status { color: #f85149; }
+  .queue-card.pending { opacity: 0.5; }
+  .qc-index { font-weight: 700; color: #8b949e; min-width: 24px; text-align: center; }
+  .qc-info { flex: 1; min-width: 0; }
+  .qc-title { font-weight: 600; font-size: 0.9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .qc-snippet { font-size: 0.78em; color: #8b949e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .qc-status { font-size: 0.75em; font-weight: 600; text-transform: uppercase; min-width: 60px; text-align: right; }
+  .queue-actions { display: flex; gap: 8px; margin-top: 4px; }
+  .queue-actions button { padding: 7px 18px; border-radius: 6px; border: none; cursor: pointer; font-weight: 600; font-size: 0.88em; }
+  #btn-approve { background: #238636; color: #fff; }
+  #btn-approve:hover { background: #2ea043; }
+  #btn-reject { background: #da3633; color: #fff; }
+  #btn-reject:hover { background: #f85149; }
+  #btn-approve-all { background: #1f6feb; color: #fff; }
+  #btn-approve-all:hover { background: #388bfd; }
+  .queue-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -89,13 +113,13 @@
 
 <!-- Review Gate Panel (hidden by default) -->
 <div id="review-panel">
-  <h2>Review Gate: Select Idea Cards</h2>
-  <div class="review-subtitle">Stage 1 is complete. Review the cards below, deselect any you want to drop, then confirm.</div>
-  <div class="review-cards" id="review-cards"></div>
-  <div class="review-actions">
-    <button id="btn-confirm" onclick="confirmReview()">Confirm Selection</button>
-    <button id="btn-select-all" onclick="selectAll()">Select All</button>
-    <button id="btn-select-none" onclick="selectNone()">Select None</button>
+  <h2>Review Gate: Approve Idea Cards</h2>
+  <div class="review-subtitle">Review each card one at a time. Approved cards immediately start building.</div>
+  <div class="review-queue" id="review-queue"></div>
+  <div class="queue-actions" id="queue-actions" style="display:none;">
+    <button id="btn-approve" onclick="respondCard('approve')">Approve</button>
+    <button id="btn-reject" onclick="respondCard('reject')">Reject</button>
+    <button id="btn-approve-all" onclick="respondCard('approve_all')">Approve All Remaining</button>
     <span class="review-count" id="review-count"></span>
   </div>
 </div>
@@ -185,77 +209,114 @@ function addEvent(type, text, ts) {
 
 function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
-// ---- Review Panel Logic ----
+// ---- Per-card Review Queue Logic ----
 
-function showReviewPanel(cards) {
-  reviewCards = cards;
-  const container = document.getElementById('review-cards');
+let reviewQueueCards = [];
+let activeCardIndex = -1;
+let approvedCount = 0, rejectedCount = 0;
+
+function showReviewQueue(cards) {
+  reviewQueueCards = cards;
+  approvedCount = 0;
+  rejectedCount = 0;
+  activeCardIndex = -1;
+  const container = document.getElementById('review-queue');
   container.innerHTML = '';
 
   cards.forEach((card, i) => {
     const el = document.createElement('div');
-    el.className = 'review-card selected';
-    el.dataset.index = card.index;
-    el.onclick = () => toggleCard(el);
+    el.className = 'queue-card pending';
+    el.id = 'qcard-' + card.index;
     el.innerHTML = `
-      <div class="rc-checkbox">&#10003;</div>
-      <div class="rc-title">${escHtml(card.title)}</div>
-      <div class="rc-scenario">${escHtml(card.scenario_excerpt || '')}</div>
-      <div class="rc-meta">
-        <span>Evidence: ${card.evidence_count} sources</span>
-        <span>Directions: ${(card.solution_directions || []).join(', ') || 'N/A'}</span>
+      <div class="qc-index">${i + 1}</div>
+      <div class="qc-info">
+        <div class="qc-title">${escHtml(card.title)}</div>
+        <div class="qc-snippet">${escHtml(card.scenario_excerpt || '')}</div>
       </div>
+      <div class="qc-status">pending</div>
     `;
     container.appendChild(el);
   });
 
   document.getElementById('review-panel').classList.add('active');
-  updateReviewCount();
+  updateQueueCount();
 }
 
-function toggleCard(el) {
-  el.classList.toggle('selected');
-  updateReviewCount();
+function highlightCard(index) {
+  activeCardIndex = index;
+  // Remove active from all, set on current
+  document.querySelectorAll('.queue-card.active').forEach(el => el.classList.remove('active'));
+  const el = document.getElementById('qcard-' + index);
+  if (el) {
+    el.classList.remove('pending');
+    el.classList.add('active');
+    el.querySelector('.qc-status').textContent = 'reviewing';
+  }
+  // Show action buttons
+  document.getElementById('queue-actions').style.display = 'flex';
+  // Enable buttons
+  document.querySelectorAll('.queue-actions button').forEach(b => b.disabled = false);
+  updateQueueCount();
 }
 
-function selectAll() {
-  document.querySelectorAll('.review-card').forEach(el => el.classList.add('selected'));
-  updateReviewCount();
+function markCard(index, action) {
+  const el = document.getElementById('qcard-' + index);
+  if (!el) return;
+  // Skip if already in final state (avoid double-counting from approve_all echo)
+  if (el.classList.contains('approved') || el.classList.contains('rejected')) return;
+  el.classList.remove('active', 'pending');
+  el.classList.add(action === 'approved' ? 'approved' : 'rejected');
+  el.querySelector('.qc-status').textContent = action;
+  if (action === 'approved') approvedCount++;
+  else rejectedCount++;
+  updateQueueCount();
 }
 
-function selectNone() {
-  document.querySelectorAll('.review-card').forEach(el => el.classList.remove('selected'));
-  updateReviewCount();
-}
+function respondCard(action) {
+  if (activeCardIndex < 0) return;
+  const respondingIndex = activeCardIndex;
+  // Disable buttons while waiting for next card
+  document.querySelectorAll('.queue-actions button').forEach(b => b.disabled = true);
 
-function updateReviewCount() {
-  const selected = document.querySelectorAll('.review-card.selected').length;
-  const total = document.querySelectorAll('.review-card').length;
-  document.getElementById('review-count').textContent = `${selected} / ${total} selected`;
-}
-
-function confirmReview() {
-  const selectedIndices = [];
-  document.querySelectorAll('.review-card.selected').forEach(el => {
-    selectedIndices.push(parseInt(el.dataset.index));
-  });
-
-  if (selectedIndices.length === 0) {
-    if (!confirm('No cards selected. This will produce an empty result. Continue?')) return;
+  // Optimistically mark the current card locally for immediate feedback
+  if (action === 'approve') {
+    markCard(respondingIndex, 'approved');
+  } else if (action === 'reject') {
+    markCard(respondingIndex, 'rejected');
+  } else if (action === 'approve_all') {
+    // Mark current and all remaining pending cards
+    reviewQueueCards.forEach(card => {
+      markCard(card.index, 'approved');
+    });
+    activeCardIndex = -1;
+    document.getElementById('queue-actions').style.display = 'none';
   }
 
-  // Send selection back to server
+  // Send response to server
   if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
     wsConnection.send(JSON.stringify({
-      type: 'review_selection',
-      selected_indices: selectedIndices,
+      type: 'card_review_response',
+      card_index: respondingIndex,
+      action: action,
     }));
   }
+}
 
-  // Visual confirmation
+function finishReviewQueue(data) {
+  activeCardIndex = -1;
+  document.getElementById('queue-actions').style.display = 'none';
   document.getElementById('review-panel').classList.add('confirmed');
+  const approved = data.approved ?? approvedCount;
+  const rejected = data.rejected ?? rejectedCount;
   document.querySelector('#review-panel h2').textContent =
-    `Review Complete: ${selectedIndices.length} cards selected`;
+    `Review Complete: ${approved} approved, ${rejected} rejected`;
+}
+
+function updateQueueCount() {
+  const total = reviewQueueCards.length;
+  const remaining = total - approvedCount - rejectedCount;
+  document.getElementById('review-count').textContent =
+    `${approvedCount} approved, ${rejectedCount} rejected, ${remaining} remaining`;
 }
 
 // ---- Event Handling ----
@@ -317,16 +378,24 @@ function handleEvent(ev) {
     addEvent('info', `Found ${data.count} crowd directions: ${(data.directions||[]).join(', ')}`, ts);
   }
   else if (type === 'review_requested') {
-    showReviewPanel(data.cards || []);
+    // Legacy batch review (kept for backward compat)
+    showReviewQueue(data.cards || []);
+  }
+  else if (type === 'review_queue_started') {
+    showReviewQueue(data.cards || []);
+  }
+  else if (type === 'card_review_requested') {
+    highlightCard(data.index);
+  }
+  else if (type === 'card_reviewed') {
+    markCard(data.index, data.action);
+  }
+  else if (type === 'review_queue_completed') {
+    finishReviewQueue(data);
   }
   else if (type === 'review_completed') {
-    // Ensure panel shows confirmed state
-    const panel = document.getElementById('review-panel');
-    if (!panel.classList.contains('confirmed')) {
-      panel.classList.add('confirmed');
-      document.querySelector('#review-panel h2').textContent =
-        `Review Complete: ${data.selected} / ${data.total} cards selected`;
-    }
+    // Legacy batch review completed
+    finishReviewQueue({ approved: data.selected, rejected: (data.total || 0) - (data.selected || 0) });
   }
   else if (type === 'dev_completed') {
     const s = getOrCreateSession(data.session_id);

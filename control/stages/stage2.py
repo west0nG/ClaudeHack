@@ -94,7 +94,7 @@ async def _run_card_pipeline(
         idea_card_content=card_content,
     )
 
-    concept_result = await session_mgr.run_session(SessionConfig(
+    concept_result = await session_mgr.run_session_bounded(SessionConfig(
         session_id=f"concept-{slug}",
         prompt=concept_prompt,
         working_dir=str(concept_work_dir),
@@ -150,7 +150,7 @@ async def _run_card_pipeline(
         concept_content=concept_content,
     )
 
-    logic_result = await session_mgr.run_session(SessionConfig(
+    logic_result = await session_mgr.run_session_bounded(SessionConfig(
         session_id=f"logic-{slug}",
         prompt=logic_prompt,
         working_dir=str(logic_work_dir),
@@ -192,7 +192,7 @@ async def _run_card_pipeline(
         logic_content=logic_content,
     )
 
-    tech_result = await session_mgr.run_session(SessionConfig(
+    tech_result = await session_mgr.run_session_bounded(SessionConfig(
         session_id=f"tech-{slug}",
         prompt=technical_prompt,
         working_dir=str(tech_work_dir),

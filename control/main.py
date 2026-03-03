@@ -23,8 +23,8 @@ from control.review_gate import ReviewGate
 from control.session_manager import SessionManager
 from control.stages.stage0 import run_stage0
 from control.stages.stage1 import run_stage1
-from control.stages.stage2 import run_stage2
-from control.stages.stage3 import run_stage3
+from control.stages.stage2 import _run_card_pipeline, _slugify, run_stage2
+from control.stages.stage3 import _run_project_pipeline, _slugify_prd_dir, run_stage3
 from control.ws_server import WebSocketServer
 
 logging.basicConfig(
@@ -70,6 +70,31 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--skip-review", action="store_true", help="Skip manual review gate after Stage 1")
     return parser.parse_args()
+
+
+async def _run_card_end_to_end(
+    card_path: Path,
+    theme: str,
+    session_mgr: SessionManager,
+    event_bus: EventBus,
+) -> Path | None:
+    """Run a single card through Stage 2 (PRD) then Stage 3 (Demo).
+
+    Returns the demo project directory on success, or None if eliminated/failed.
+    """
+    slug = _slugify(card_path)
+
+    # Stage 2: card -> PRD directory
+    prd_dir = await _run_card_pipeline(card_path, slug, theme, session_mgr, event_bus)
+    if prd_dir is None:
+        return None  # eliminated or failed
+
+    # Stage 3: PRD directory -> project directory
+    project_slug = _slugify_prd_dir(prd_dir)
+    project_dir = await _run_project_pipeline(
+        prd_dir, project_slug, theme, session_mgr, event_bus
+    )
+    return project_dir
 
 
 async def async_main() -> None:
@@ -206,58 +231,87 @@ async def async_main() -> None:
         logger.info("Stage 1 produced %d Idea Cards", len(idea_cards))
 
         # ----------------------------------------------------------
-        # Review Gate: manual filtering between Stage 1 and Stage 2
+        # Streaming Pipeline: ReviewGate → Stage 2 → Stage 3
+        # Cards flow individually: approved cards immediately start
+        # Stage 2, and Stage 2 outputs immediately start Stage 3.
         # ----------------------------------------------------------
-        if not args.skip_review and idea_cards:
-            review_gate = ReviewGate(event_bus, ws_server=ws_server)
-            idea_cards = await review_gate.wait_for_selection(idea_cards)
-            logger.info("After review: %d cards selected", len(idea_cards))
 
-        # In single mode, limit to 1 card for Stage 2
+        # In single mode, limit to 1 card
         if args.mode == "single" and len(idea_cards) > 1:
             idea_cards = idea_cards[:1]
-            logger.info("Single mode: limited to 1 card for Stage 2")
+            logger.info("Single mode: limited to 1 card")
 
-        # ----------------------------------------------------------
-        # Stage 2: PRD Generation
-        # ----------------------------------------------------------
-        if idea_cards:
-            logger.info("Starting Stage 2: PRD Generation (%d cards)", len(idea_cards))
-            prd_dirs = await run_stage2(
-                idea_cards=idea_cards,
-                theme=brief.theme,
-                session_mgr=session_mgr,
-                event_bus=event_bus,
-            )
-
-            logger.info("Stage 2 complete: %d PRD directories produced", len(prd_dirs))
-            for d in prd_dirs:
-                logger.info("  - %s", d)
-        else:
+        if not idea_cards:
             logger.info("No Idea Cards to process — pipeline ending after Stage 1")
-            prd_dirs = []
-
-        # ----------------------------------------------------------
-        # Stage 3: Demo Development
-        # ----------------------------------------------------------
-        if prd_dirs:
-            logger.info("Starting Stage 3: Demo Development (%d PRDs)", len(prd_dirs))
-            project_dirs = await run_stage3(
-                prd_dirs=prd_dirs,
-                theme=brief.theme,
-                session_mgr=session_mgr,
-                event_bus=event_bus,
-            )
-
             logger.info("=" * 60)
-            logger.info("Pipeline complete! %d projects built:", len(project_dirs))
-            for d in project_dirs:
-                logger.info("  - %s", d)
-            logger.info("=" * 60)
+            return
+
+        # In streaming mode, stages 2 and 3 overlap per card.
+        # Emit stage_started for stage 2 so dashboard shows progress.
+        await event_bus.emit(Event(
+            type="stage_started",
+            data={"stage": 2, "theme": brief.theme, "cards": len(idea_cards)},
+        ))
+
+        card_tasks: list[asyncio.Task[Path | None]] = []
+
+        if args.skip_review:
+            # No review — launch all cards immediately
+            logger.info("Launching streaming pipeline for %d cards (review skipped)", len(idea_cards))
+            for card in idea_cards:
+                task = asyncio.create_task(
+                    _run_card_end_to_end(card, brief.theme, session_mgr, event_bus)
+                )
+                card_tasks.append(task)
         else:
+            # Streaming review: yield one card at a time, launch each immediately
+            logger.info("Starting streaming review for %d cards", len(idea_cards))
+            review_gate = ReviewGate(event_bus, ws_server=ws_server)
+            async for card in review_gate.stream_approved_cards(idea_cards):
+                logger.info("Card approved, launching pipeline: %s", card.name)
+                task = asyncio.create_task(
+                    _run_card_end_to_end(card, brief.theme, session_mgr, event_bus)
+                )
+                card_tasks.append(task)
+
+        if not card_tasks:
+            logger.info("No cards approved — pipeline ending after review")
             logger.info("=" * 60)
-            logger.info("No PRD directories to build — pipeline ending after Stage 2")
-            logger.info("=" * 60)
+            return
+
+        # Wait for all card pipelines to complete
+        results = await asyncio.gather(*card_tasks, return_exceptions=True)
+
+        # Collect successful project directories
+        project_dirs: list[Path] = []
+        failed_count = 0
+        for r in results:
+            if isinstance(r, BaseException):
+                logger.error("Card pipeline raised exception: %s", r, exc_info=r)
+                failed_count += 1
+            elif isinstance(r, Path):
+                project_dirs.append(r)
+            else:
+                # None: card was eliminated or pipeline failed (already logged internally)
+                failed_count += 1
+
+        # Emit stage_completed for stage 3 (the final stage in the pipeline)
+        await event_bus.emit(Event(
+            type="stage_completed",
+            data={
+                "stage": 3,
+                "projects": len(project_dirs),
+                "failed": failed_count,
+            },
+        ))
+
+        logger.info("=" * 60)
+        if failed_count:
+            logger.info("%d cards produced no project (eliminated or failed)", failed_count)
+        logger.info("Pipeline complete! %d projects built:", len(project_dirs))
+        for d in project_dirs:
+            logger.info("  - %s", d)
+        logger.info("=" * 60)
 
     except KeyboardInterrupt:
         logger.info("Interrupted by user")

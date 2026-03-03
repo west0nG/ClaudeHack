@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 from control.event_bus import EventBus
@@ -62,12 +63,19 @@ class ReviewGate:
         self._event_bus = event_bus
         self._ws_server = ws_server
         self._selection_future: asyncio.Future[list[int]] | None = None
+        # Per-card streaming state
+        self._card_response_queue: asyncio.Queue[dict] | None = None
 
     def handle_review_selection(self, message: dict) -> None:
-        """Called by WebSocket server when dashboard sends a selection."""
+        """Called by WebSocket server when dashboard sends a batch selection."""
         if self._selection_future and not self._selection_future.done():
             indices = message.get("selected_indices", [])
             self._selection_future.set_result(indices)
+
+    def handle_card_review_response(self, message: dict) -> None:
+        """Called by WebSocket server when dashboard sends a per-card decision."""
+        if self._card_response_queue is not None:
+            self._card_response_queue.put_nowait(message)
 
     async def wait_for_selection(self, cards: list[Path]) -> list[Path]:
         """Present cards to user and wait for selection. Returns filtered list."""
@@ -108,6 +116,180 @@ class ReviewGate:
         ))
 
         return selected
+
+    async def stream_approved_cards(self, cards: list[Path]) -> AsyncIterator[Path]:
+        """Yield cards one at a time as the user approves them.
+
+        For each card the user can: approve (yielded), reject (skipped),
+        or approve-all (yield all remaining). Works via dashboard WebSocket
+        or CLI fallback.
+        """
+        if not cards:
+            return
+
+        # Build summaries for all cards
+        card_summaries = []
+        for i, card_path in enumerate(cards):
+            try:
+                summary = _parse_card(card_path)
+                summary["index"] = i
+                card_summaries.append(summary)
+            except Exception:
+                logger.warning("Failed to parse card: %s", card_path, exc_info=True)
+                card_summaries.append({
+                    "index": i,
+                    "file": card_path.name,
+                    "title": card_path.stem,
+                    "scenario_excerpt": "(parse error)",
+                    "evidence_count": 0,
+                    "solution_directions": [],
+                })
+
+        # Emit queue start so dashboard can render the full list
+        await self._event_bus.emit(Event(
+            type="review_queue_started",
+            data={"cards": card_summaries, "total": len(cards)},
+        ))
+
+        approved_count = 0
+        rejected_count = 0
+
+        try:
+            if self._ws_server:
+                yield_from = self._stream_dashboard_review(cards, card_summaries)
+            else:
+                yield_from = self._stream_cli_review(cards, card_summaries)
+
+            async for card_path, action in yield_from:
+                if action == "approved":
+                    approved_count += 1
+                    yield card_path
+                else:
+                    rejected_count += 1
+        finally:
+            # Always emit completion, even if the caller closes the generator early
+            await self._event_bus.emit(Event(
+                type="review_queue_completed",
+                data={
+                    "approved": approved_count,
+                    "rejected": rejected_count,
+                    "total": len(cards),
+                },
+            ))
+            logger.info(
+                "Streaming review complete: %d approved, %d rejected out of %d",
+                approved_count, rejected_count, len(cards),
+            )
+
+    async def _stream_dashboard_review(
+        self,
+        cards: list[Path],
+        card_summaries: list[dict],
+    ) -> AsyncIterator[tuple[Path, str]]:
+        """Yield (card_path, action) pairs from dashboard WebSocket interaction."""
+        self._card_response_queue = asyncio.Queue()
+        self._ws_server.register_handler(
+            "card_review_response", self.handle_card_review_response
+        )
+        try:
+            for i, card_path in enumerate(cards):
+                await self._event_bus.emit(Event(
+                    type="card_review_requested",
+                    data={"card": card_summaries[i], "index": i, "total": len(cards)},
+                ))
+
+                try:
+                    response = await asyncio.wait_for(
+                        self._card_response_queue.get(),
+                        timeout=REVIEW_TIMEOUT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Per-card review timeout at card %d — auto-approving remaining", i
+                    )
+                    for j in range(i, len(cards)):
+                        await self._event_bus.emit(Event(
+                            type="card_reviewed",
+                            data={"index": j, "action": "approved"},
+                        ))
+                        yield cards[j], "approved"
+                    return
+
+                action = response.get("action", "approve")
+
+                if action == "approve":
+                    await self._event_bus.emit(Event(
+                        type="card_reviewed",
+                        data={"index": i, "action": "approved"},
+                    ))
+                    yield card_path, "approved"
+                elif action == "reject":
+                    await self._event_bus.emit(Event(
+                        type="card_reviewed",
+                        data={"index": i, "action": "rejected"},
+                    ))
+                    yield card_path, "rejected"
+                elif action == "approve_all":
+                    for j in range(i, len(cards)):
+                        await self._event_bus.emit(Event(
+                            type="card_reviewed",
+                            data={"index": j, "action": "approved"},
+                        ))
+                        yield cards[j], "approved"
+                    return
+                else:
+                    # Unrecognized action — default to approve
+                    logger.warning("Unknown review action '%s' for card %d, defaulting to approve", action, i)
+                    await self._event_bus.emit(Event(
+                        type="card_reviewed",
+                        data={"index": i, "action": "approved"},
+                    ))
+                    yield card_path, "approved"
+        finally:
+            self._ws_server.unregister_handler("card_review_response")
+            self._card_response_queue = None
+
+    async def _stream_cli_review(
+        self,
+        cards: list[Path],
+        card_summaries: list[dict],
+    ) -> AsyncIterator[tuple[Path, str]]:
+        """Yield (card_path, action) pairs from CLI interaction."""
+        loop = asyncio.get_running_loop()
+        for i, card_path in enumerate(cards):
+            summary = card_summaries[i]
+            # Intentional print() for interactive CLI UX
+            print(f"\n--- Card {i + 1}/{len(cards)} ---")
+            print(f"  Title: {summary['title']}")
+            if summary.get("scenario_excerpt"):
+                print(f"  {summary['scenario_excerpt']}")
+            print(
+                f"  Evidence: {summary['evidence_count']} sources | "
+                f"Directions: {', '.join(summary.get('solution_directions', []))}"
+            )
+            print("  [y]es / [n]o / [a]pprove all remaining >", end=" ", flush=True)
+
+            try:
+                raw = await asyncio.wait_for(
+                    loop.run_in_executor(None, input, ""),
+                    timeout=REVIEW_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("CLI review timeout — approving remaining cards")
+                for j in range(i, len(cards)):
+                    yield cards[j], "approved"
+                return
+
+            choice = raw.strip().lower()
+            if choice in ("a", "approve", "approve all"):
+                for j in range(i, len(cards)):
+                    yield cards[j], "approved"
+                return
+            elif choice in ("n", "no"):
+                yield card_path, "rejected"
+            else:
+                # Default: approve (y, yes, or empty)
+                yield card_path, "approved"
 
     async def _wait_dashboard_selection(
         self, cards: list[Path], summaries: list[dict]

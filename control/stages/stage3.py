@@ -117,7 +117,7 @@ async def _run_project_pipeline(
         technical_content=technical_content,
     )
 
-    plan_result = await session_mgr.run_session(SessionConfig(
+    plan_result = await session_mgr.run_session_bounded(SessionConfig(
         session_id=f"plan-{slug}",
         prompt=plan_prompt,
         working_dir=str(plan_work_dir),
@@ -159,7 +159,7 @@ async def _run_project_pipeline(
         dev_plan_content=dev_plan_content,
     )
 
-    dev_result = await session_mgr.run_session(SessionConfig(
+    dev_result = await session_mgr.run_session_bounded(SessionConfig(
         session_id=f"dev-{slug}",
         prompt=dev_prompt,
         working_dir=str(dev_work_dir),
@@ -187,7 +187,7 @@ async def _run_project_pipeline(
         dev_plan_content=dev_plan_content,
     )
 
-    review_result = await session_mgr.run_session(SessionConfig(
+    review_result = await session_mgr.run_session_bounded(SessionConfig(
         session_id=f"review-{slug}",
         prompt=review_prompt,
         working_dir=str(dev_work_dir),
@@ -224,7 +224,7 @@ async def _run_project_pipeline(
         # Remove BUILD_FAILED.md so fresh attempt starts clean
         outputs["build_failed"].unlink()
 
-        bounce_dev_result = await session_mgr.run_session(SessionConfig(
+        bounce_dev_result = await session_mgr.run_session_bounded(SessionConfig(
             session_id=f"dev-{slug}-fix",
             prompt=bounce_prompt,
             working_dir=str(dev_work_dir),
@@ -236,7 +236,7 @@ async def _run_project_pipeline(
 
         if bounce_dev_result.status == SessionStatus.COMPLETED:
             # Re-run review
-            bounce_review_result = await session_mgr.run_session(SessionConfig(
+            bounce_review_result = await session_mgr.run_session_bounded(SessionConfig(
                 session_id=f"review-{slug}-fix",
                 prompt=review_prompt,
                 working_dir=str(dev_work_dir),
