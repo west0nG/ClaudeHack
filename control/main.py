@@ -6,7 +6,7 @@ Usage:
     python -m control.main --prompt "Build an innovative solution using generative AI..."
     python -m control.main --prompt-file hackathon-brief.txt
     python -m control.main --idea-card workspace/stage1/output/idea-card-xxx.md
-    python -m control.main --prd workspace/stage2/output/prd-xxx.md
+    python -m control.main --prd-dir workspace/stage2/output/some-slug/
 """
 
 from __future__ import annotations
@@ -48,8 +48,8 @@ def parse_args() -> argparse.Namespace:
         help="Path to a specific Idea Card file — skip Stage 1, run Stage 2 directly",
     )
     input_group.add_argument(
-        "--prd",
-        help="Path to a specific PRD file — skip Stages 0-2, run Stage 3 directly",
+        "--prd-dir",
+        help="Path to a PRD directory (containing concept.md, logic.md, technical.md) — skip Stages 0-2, run Stage 3 directly",
     )
 
     parser.add_argument("--interests", default=None, help="Comma-separated interest hints (optional)")
@@ -101,19 +101,26 @@ async def async_main() -> None:
 
     try:
         # ----------------------------------------------------------
-        # Direct PRD mode: skip Stages 0-2, run Stage 3 only
+        # Direct PRD directory mode: skip Stages 0-2, run Stage 3 only
         # ----------------------------------------------------------
-        if args.prd:
-            prd_path = Path(args.prd)
-            if not prd_path.exists():
-                logger.error("PRD file not found: %s", args.prd)
+        if args.prd_dir:
+            prd_dir = Path(args.prd_dir)
+            if not prd_dir.is_dir():
+                logger.error("PRD directory not found: %s", args.prd_dir)
                 sys.exit(1)
 
-            theme = _extract_theme_from_prd(prd_path)
-            logger.info("Running Stage 3 directly on: %s (theme: %s)", prd_path.name, theme)
+            # Validate required files exist
+            required_files = ["concept.md", "logic.md", "technical.md"]
+            missing = [f for f in required_files if not (prd_dir / f).exists()]
+            if missing:
+                logger.error("PRD directory missing files: %s", ", ".join(missing))
+                sys.exit(1)
+
+            theme = _extract_theme_from_concept(prd_dir / "concept.md")
+            logger.info("Running Stage 3 directly on: %s (theme: %s)", prd_dir.name, theme)
 
             project_dirs = await run_stage3(
-                prd_files=[prd_path],
+                prd_dirs=[prd_dir],
                 theme=theme,
                 session_mgr=session_mgr,
                 event_bus=event_bus,
@@ -142,7 +149,7 @@ async def async_main() -> None:
             logger.info("Running Stage 2 directly on: %s (theme: %s)", card_path.name, theme)
 
             idea_cards = [card_path]
-            prd_files = await run_stage2(
+            prd_dirs = await run_stage2(
                 idea_cards=idea_cards,
                 theme=theme,
                 session_mgr=session_mgr,
@@ -150,9 +157,9 @@ async def async_main() -> None:
             )
 
             logger.info("=" * 60)
-            logger.info("Stage 2 complete! %d PRDs produced:", len(prd_files))
-            for prd in prd_files:
-                logger.info("  - %s", prd.name)
+            logger.info("Stage 2 complete! %d PRD directories produced:", len(prd_dirs))
+            for d in prd_dirs:
+                logger.info("  - %s", d)
             logger.info("=" * 60)
             return
 
@@ -216,27 +223,27 @@ async def async_main() -> None:
         # ----------------------------------------------------------
         if idea_cards:
             logger.info("Starting Stage 2: PRD Generation (%d cards)", len(idea_cards))
-            prd_files = await run_stage2(
+            prd_dirs = await run_stage2(
                 idea_cards=idea_cards,
                 theme=brief.theme,
                 session_mgr=session_mgr,
                 event_bus=event_bus,
             )
 
-            logger.info("Stage 2 complete: %d PRDs produced", len(prd_files))
-            for prd in prd_files:
-                logger.info("  - %s", prd.name)
+            logger.info("Stage 2 complete: %d PRD directories produced", len(prd_dirs))
+            for d in prd_dirs:
+                logger.info("  - %s", d)
         else:
             logger.info("No Idea Cards to process — pipeline ending after Stage 1")
-            prd_files = []
+            prd_dirs = []
 
         # ----------------------------------------------------------
         # Stage 3: Demo Development
         # ----------------------------------------------------------
-        if prd_files:
-            logger.info("Starting Stage 3: Demo Development (%d PRDs)", len(prd_files))
+        if prd_dirs:
+            logger.info("Starting Stage 3: Demo Development (%d PRDs)", len(prd_dirs))
             project_dirs = await run_stage3(
-                prd_files=prd_files,
+                prd_dirs=prd_dirs,
                 theme=brief.theme,
                 session_mgr=session_mgr,
                 event_bus=event_bus,
@@ -249,7 +256,7 @@ async def async_main() -> None:
             logger.info("=" * 60)
         else:
             logger.info("=" * 60)
-            logger.info("No PRDs to build — pipeline ending after Stage 2")
+            logger.info("No PRD directories to build — pipeline ending after Stage 2")
             logger.info("=" * 60)
 
     except KeyboardInterrupt:
@@ -264,16 +271,16 @@ async def async_main() -> None:
             await ws_server.stop()
 
 
-def _extract_theme_from_prd(prd_path: Path) -> str:
-    """Best-effort theme extraction from a PRD file for --prd mode."""
+def _extract_theme_from_concept(concept_path: Path) -> str:
+    """Best-effort theme extraction from a concept.md file for --prd-dir mode."""
     import re
-    text = prd_path.read_text(encoding="utf-8")
-    # Look for theme mention in the PRD content
+    text = concept_path.read_text(encoding="utf-8")
+    # Look for theme mention in the concept content
     theme_match = re.search(r"Hackathon Theme[:\s]*(.+)", text, re.IGNORECASE)
     if theme_match:
         return theme_match.group(1).strip()
-    # Fallback: use the PRD title
-    title_match = re.search(r"^#\s+(?:PRD:\s*)?(.+)$", text, re.MULTILINE)
+    # Fallback: use the concept title
+    title_match = re.search(r"^#\s+(?:Product Concept:\s*)?(.+)$", text, re.MULTILINE)
     if title_match:
         return title_match.group(1).strip()
     return "General"
