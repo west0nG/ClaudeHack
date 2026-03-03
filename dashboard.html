@@ -328,6 +328,18 @@ function handleEvent(ev) {
         `Review Complete: ${data.selected} / ${data.total} cards selected`;
     }
   }
+  else if (type === 'dev_completed') {
+    const s = getOrCreateSession(data.session_id);
+    s.activity = `Project built${data.has_readme ? ' (README)' : ''}`;
+    renderSession(data.session_id);
+    appendLog(data.session_id, `Project: ${data.project_dir}`, ts);
+  }
+  else if (type === 'dev_failed') {
+    const s = getOrCreateSession(data.session_id);
+    s.activity = `Build failed: ${(data.error || 'unknown').slice(0, 80)}`;
+    renderSession(data.session_id);
+    appendLog(data.session_id, `Dev failed: ${data.error}`, ts);
+  }
 }
 
 // WebSocket connection with auto-reconnect

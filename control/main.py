@@ -5,7 +5,8 @@ Usage:
     python -m control.main --theme "AI + Education" --interests "学生,教师"
     python -m control.main --prompt "Build an innovative solution using generative AI..."
     python -m control.main --prompt-file hackathon-brief.txt
-    python -m control.main --idea-card workspace/stage1/output/idea-card-xxx.md --theme "AI + Education"
+    python -m control.main --idea-card workspace/stage1/output/idea-card-xxx.md
+    python -m control.main --prd workspace/stage2/output/prd-xxx.md
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from control.session_manager import SessionManager
 from control.stages.stage0 import run_stage0
 from control.stages.stage1 import run_stage1
 from control.stages.stage2 import run_stage2
+from control.stages.stage3 import run_stage3
 from control.ws_server import WebSocketServer
 
 logging.basicConfig(
@@ -44,6 +46,10 @@ def parse_args() -> argparse.Namespace:
     input_group.add_argument(
         "--idea-card",
         help="Path to a specific Idea Card file — skip Stage 1, run Stage 2 directly",
+    )
+    input_group.add_argument(
+        "--prd",
+        help="Path to a specific PRD file — skip Stages 0-2, run Stage 3 directly",
     )
 
     parser.add_argument("--interests", default=None, help="Comma-separated interest hints (optional)")
@@ -94,6 +100,32 @@ async def async_main() -> None:
     session_mgr = SessionManager(max_concurrent=effective_concurrent, event_bus=event_bus)
 
     try:
+        # ----------------------------------------------------------
+        # Direct PRD mode: skip Stages 0-2, run Stage 3 only
+        # ----------------------------------------------------------
+        if args.prd:
+            prd_path = Path(args.prd)
+            if not prd_path.exists():
+                logger.error("PRD file not found: %s", args.prd)
+                sys.exit(1)
+
+            theme = _extract_theme_from_prd(prd_path)
+            logger.info("Running Stage 3 directly on: %s (theme: %s)", prd_path.name, theme)
+
+            project_dirs = await run_stage3(
+                prd_files=[prd_path],
+                theme=theme,
+                session_mgr=session_mgr,
+                event_bus=event_bus,
+            )
+
+            logger.info("=" * 60)
+            logger.info("Stage 3 complete! %d projects built:", len(project_dirs))
+            for d in project_dirs:
+                logger.info("  - %s", d)
+            logger.info("=" * 60)
+            return
+
         # ----------------------------------------------------------
         # Direct Idea Card mode: skip Stage 0 + Stage 1, run Stage 2 only
         # ----------------------------------------------------------
@@ -191,14 +223,33 @@ async def async_main() -> None:
                 event_bus=event_bus,
             )
 
-            logger.info("=" * 60)
-            logger.info("Pipeline complete! %d PRDs produced:", len(prd_files))
+            logger.info("Stage 2 complete: %d PRDs produced", len(prd_files))
             for prd in prd_files:
                 logger.info("  - %s", prd.name)
+        else:
+            logger.info("No Idea Cards to process — pipeline ending after Stage 1")
+            prd_files = []
+
+        # ----------------------------------------------------------
+        # Stage 3: Demo Development
+        # ----------------------------------------------------------
+        if prd_files:
+            logger.info("Starting Stage 3: Demo Development (%d PRDs)", len(prd_files))
+            project_dirs = await run_stage3(
+                prd_files=prd_files,
+                theme=brief.theme,
+                session_mgr=session_mgr,
+                event_bus=event_bus,
+            )
+
+            logger.info("=" * 60)
+            logger.info("Pipeline complete! %d projects built:", len(project_dirs))
+            for d in project_dirs:
+                logger.info("  - %s", d)
             logger.info("=" * 60)
         else:
             logger.info("=" * 60)
-            logger.info("No Idea Cards to process — pipeline ending after Stage 1")
+            logger.info("No PRDs to build — pipeline ending after Stage 2")
             logger.info("=" * 60)
 
     except KeyboardInterrupt:
@@ -211,6 +262,21 @@ async def async_main() -> None:
             # Keep WS alive briefly so dashboard can show final state
             await asyncio.sleep(2)
             await ws_server.stop()
+
+
+def _extract_theme_from_prd(prd_path: Path) -> str:
+    """Best-effort theme extraction from a PRD file for --prd mode."""
+    import re
+    text = prd_path.read_text(encoding="utf-8")
+    # Look for theme mention in the PRD content
+    theme_match = re.search(r"Hackathon Theme[:\s]*(.+)", text, re.IGNORECASE)
+    if theme_match:
+        return theme_match.group(1).strip()
+    # Fallback: use the PRD title
+    title_match = re.search(r"^#\s+(?:PRD:\s*)?(.+)$", text, re.MULTILINE)
+    if title_match:
+        return title_match.group(1).strip()
+    return "General"
 
 
 def _extract_theme_from_card(card_path: Path) -> str:

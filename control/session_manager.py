@@ -73,6 +73,10 @@ class SessionManager:
             {"session_id": config.session_id, "model": config.model},
         )
 
+        # Allow launching claude CLI from within a Claude Code session
+        env = os.environ.copy()
+        env.pop("CLAUDECODE", None)
+
         t0 = time.monotonic()
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -80,6 +84,7 @@ class SessionManager:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(work_dir),
+                env=env,
             )
             try:
                 stdout_lines = await asyncio.wait_for(
