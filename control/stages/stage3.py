@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import shutil
 from pathlib import Path
 
 from control.event_bus import EventBus
@@ -96,8 +97,14 @@ async def _run_project_pipeline(
     technical_content = (prd_dir / "technical.md").read_text(encoding="utf-8")
 
     # Working directories: plan gets its own, dev and review share one
-    plan_work_dir = WORKSPACE_DIR / slug / "plan"
-    dev_work_dir = WORKSPACE_DIR / slug / "dev"
+    project_work_dir = WORKSPACE_DIR / slug
+    plan_work_dir = project_work_dir / "plan"
+    dev_work_dir = project_work_dir / "dev"
+
+    # Clean stale data from previous runs to prevent false
+    # BUILD_FAILED.md / demo/ detection from old sessions
+    if project_work_dir.exists():
+        shutil.rmtree(project_work_dir)
     plan_work_dir.mkdir(parents=True, exist_ok=True)
     dev_work_dir.mkdir(parents=True, exist_ok=True)
 

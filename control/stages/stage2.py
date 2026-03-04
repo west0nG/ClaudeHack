@@ -75,6 +75,13 @@ async def _run_card_pipeline(
     card_content = card_path.read_text(encoding="utf-8")
     base_work_dir = WORKSPACE_DIR / slug
     output_dir = WORKSPACE_DIR / "output" / slug
+
+    # Clean stale data from previous runs to prevent false
+    # ELIMINATED.md / concept.md detection from old sessions
+    if base_work_dir.exists():
+        shutil.rmtree(base_work_dir)
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load prompt templates

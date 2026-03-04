@@ -17,10 +17,12 @@ import logging
 import sys
 from pathlib import Path
 
+import shutil
+
 from control.event_bus import EventBus
 from control.models import Event, HackathonBrief
 from control.review_gate import ReviewGate
-from control.session_manager import SessionManager
+from control.session_manager import PROJECT_ROOT, SessionManager
 from control.stages.stage0 import run_stage0
 from control.stages.stage1 import run_stage1
 from control.stages.stage2 import _run_card_pipeline, _slugify, run_stage2
@@ -69,6 +71,7 @@ def parse_args() -> argparse.Namespace:
         help="Max number of research directions (overrides --mode)",
     )
     parser.add_argument("--skip-review", action="store_true", help="Skip manual review gate after Stage 1")
+    parser.add_argument("--clean", action="store_true", help="Remove workspace/ before running (clear stale data)")
     return parser.parse_args()
 
 
@@ -123,6 +126,13 @@ async def async_main() -> None:
     # In lite mode, run sessions sequentially (max_concurrent=1)
     effective_concurrent = 1 if args.mode == "lite" else args.max_concurrent
     session_mgr = SessionManager(max_concurrent=effective_concurrent, event_bus=event_bus)
+
+    # Clean workspace if requested
+    if args.clean:
+        workspace_dir = PROJECT_ROOT / "workspace"
+        if workspace_dir.exists():
+            logger.info("Cleaning workspace: %s", workspace_dir)
+            shutil.rmtree(workspace_dir)
 
     try:
         # ----------------------------------------------------------
