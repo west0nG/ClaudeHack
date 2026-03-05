@@ -69,7 +69,7 @@ def _find_prd_dir_for_project(project_dir: Path) -> Path | None:
     return None
 
 
-def _generate_readme(project_name: str, concept_text: str, technical_text: str) -> str:
+def _generate_readme(project_name: str, concept_text: str, technical_text: str, publish_mode: str = "test") -> str:
     """Generate a standardized README.md from PRD documents."""
     # Extract sections from concept.md
     problem = _extract_section(concept_text, "Pain Point")
@@ -107,12 +107,10 @@ def _generate_readme(project_name: str, concept_text: str, technical_text: str) 
     if not project_structure:
         project_structure = _extract_section(technical_text, "Project Structure")
 
-    lines = [
-        f"# {project_name}",
-        "",
-        "> Built by Hackathon Agents",
-        "",
-    ]
+    lines = [f"# {project_name}", ""]
+
+    if publish_mode == "test":
+        lines += ["> Built by Hackathon Agents", ""]
 
     if one_liner:
         lines += ["## What is this?", "", one_liner, ""]
@@ -139,14 +137,15 @@ def _generate_readme(project_name: str, concept_text: str, technical_text: str) 
     if project_structure:
         lines += ["## Project Structure", "", project_structure, ""]
 
-    lines += [
-        "---",
-        "",
-        "*This project was built autonomously by Hackathon Agents — "
-        "an AI system that discovers problems, designs products, and builds demos "
-        "without human intervention.*",
-        "",
-    ]
+    if publish_mode == "test":
+        lines += [
+            "---",
+            "",
+            "*This project was built autonomously by Hackathon Agents — "
+            "an AI system that discovers problems, designs products, and builds demos "
+            "without human intervention.*",
+            "",
+        ]
 
     return "\n".join(lines)
 
@@ -193,6 +192,7 @@ async def _publish_project(
     event_bus: EventBus,
     private: bool = False,
     repo_slug_override: str | None = None,
+    publish_mode: str = "test",
 ) -> str | None:
     """Publish a single project to GitHub.
 
@@ -205,7 +205,7 @@ async def _publish_project(
         project_name = project_dir.parent.parent.name.replace("-", " ").title()
 
     slug = repo_slug_override or _slugify_project_name(project_name)
-    repo_name = f"hackathon-agent-{slug}"
+    repo_name = f"hg-{slug}" if publish_mode == "test" else slug
 
     await event_bus.emit(Event(
         type="publish_started",
@@ -223,16 +223,23 @@ async def _publish_project(
         if technical_file.exists():
             technical_text = technical_file.read_text(encoding="utf-8")
 
-        readme_content = _generate_readme(project_name, concept_text, technical_text)
+        readme_content = _generate_readme(project_name, concept_text, technical_text, publish_mode=publish_mode)
     else:
-        readme_content = (
-            f"# {project_name}\n\n"
-            "> Built by Hackathon Agents\n\n"
-            "## Getting Started\n\n"
-            "```bash\nnpm install\nnpm run dev\n```\n\n"
-            "---\n\n"
-            "*This project was built autonomously by Hackathon Agents.*\n"
-        )
+        if publish_mode == "test":
+            readme_content = (
+                f"# {project_name}\n\n"
+                "> Built by Hackathon Agents\n\n"
+                "## Getting Started\n\n"
+                "```bash\nnpm install\nnpm run dev\n```\n\n"
+                "---\n\n"
+                "*This project was built autonomously by Hackathon Agents.*\n"
+            )
+        else:
+            readme_content = (
+                f"# {project_name}\n\n"
+                "## Getting Started\n\n"
+                "```bash\nnpm install\nnpm run dev\n```\n"
+            )
 
     # Write README.md
     readme_path = project_dir / "README.md"
@@ -260,12 +267,22 @@ async def _publish_project(
     # Ensure git identity is set (local to this repo, won't affect global config)
     rc_name, _, _ = await _run_cmd(["git", "config", "user.name"], cwd=project_dir)
     if rc_name != 0:
+        # In use mode, query gh for the authenticated user's identity
+        fallback_name = "Hackathon Agent"
+        fallback_email = "hackathon-agent@noreply.github.com"
+        if publish_mode == "use":
+            rc_gh, gh_out, _ = await _run_cmd(
+                ["gh", "api", "user", "-q", ".login"],
+            )
+            if rc_gh == 0 and gh_out.strip():
+                gh_login = gh_out.strip()
+                fallback_name = gh_login
+                fallback_email = f"{gh_login}@users.noreply.github.com"
         await _run_cmd(
-            ["git", "config", "user.name", "Hackathon Agent"], cwd=project_dir
+            ["git", "config", "user.name", fallback_name], cwd=project_dir
         )
         await _run_cmd(
-            ["git", "config", "user.email", "hackathon-agent@noreply.github.com"],
-            cwd=project_dir,
+            ["git", "config", "user.email", fallback_email], cwd=project_dir,
         )
 
     rc, _, err = await _run_cmd(["git", "add", "-A"], cwd=project_dir)
@@ -326,6 +343,7 @@ async def run_stage4(
     event_bus: EventBus,
     private: bool = False,
     prd_dirs: list[Path] | None = None,
+    publish_mode: str = "test",
 ) -> list[str]:
     """Execute Stage 4: Publish demo projects to GitHub.
 
@@ -369,7 +387,8 @@ async def run_stage4(
             used_names[slug] = 0
 
         tasks.append(_publish_project(
-            project_dir, prd_dir, event_bus, private=private, repo_slug_override=slug,
+            project_dir, prd_dir, event_bus, private=private,
+            repo_slug_override=slug, publish_mode=publish_mode,
         ))
 
     logger.info("Stage 4: Publishing %d projects to GitHub", len(tasks))

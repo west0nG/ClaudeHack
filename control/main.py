@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import shutil
@@ -75,6 +76,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--clean", action="store_true", help="Remove workspace/ before running (clear stale data)")
     parser.add_argument("--skip-publish", action="store_true", help="Skip Stage 4 (GitHub publishing)")
     parser.add_argument("--private", action="store_true", help="Create private GitHub repos instead of public")
+    parser.add_argument(
+        "--publish-mode",
+        choices=["test", "use"],
+        default="test",
+        help="test: repo name prefixed with hg-, README mentions AI. use: clean repo name, no AI attribution.",
+    )
+    parser.add_argument("--no-archive", action="store_true", help="Skip archiving workspace after run")
     return parser.parse_args()
 
 
@@ -176,6 +184,7 @@ async def async_main() -> None:
                 repo_urls = await run_stage4(
                     project_dirs, event_bus, private=args.private,
                     prd_dirs=[prd_dir] * len(project_dirs),
+                    publish_mode=args.publish_mode,
                 )
                 logger.info("=" * 60)
                 logger.info("Published %d repos:", len(repo_urls))
@@ -342,7 +351,7 @@ async def async_main() -> None:
         # Stage 4: Publish to GitHub
         if project_dirs and not args.skip_publish:
             logger.info("Starting Stage 4: Publishing %d projects to GitHub", len(project_dirs))
-            repo_urls = await run_stage4(project_dirs, event_bus, private=args.private)
+            repo_urls = await run_stage4(project_dirs, event_bus, private=args.private, publish_mode=args.publish_mode)
             logger.info("=" * 60)
             logger.info("Published %d repos:", len(repo_urls))
             for url in repo_urls:
@@ -355,10 +364,33 @@ async def async_main() -> None:
         logger.exception("Pipeline failed")
         sys.exit(1)
     finally:
+        # Archive workspace
+        if not args.no_archive:
+            _archive_workspace()
+
         if ws_server:
             # Keep WS alive briefly so dashboard can show final state
             await asyncio.sleep(2)
             await ws_server.stop()
+
+
+def _archive_workspace() -> Path | None:
+    """Move workspace/ to archive/{timestamp}/.
+
+    Returns the archive path, or None if there was nothing to archive.
+    """
+    workspace_dir = PROJECT_ROOT / "workspace"
+    if not workspace_dir.exists():
+        return None
+
+    archive_dir = PROJECT_ROOT / "archive"
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = archive_dir / timestamp
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(workspace_dir), str(dest))
+    logger.info("Archived workspace to: %s", dest)
+    return dest
 
 
 def _extract_theme_from_concept(concept_path: Path) -> str:

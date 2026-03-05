@@ -1,4 +1,5 @@
 workspace/
+archive/
 __pycache__/
 *.pyc
 .env
