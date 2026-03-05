@@ -409,6 +409,15 @@ function handleEvent(ev) {
     renderSession(data.session_id);
     appendLog(data.session_id, `Dev failed: ${data.error}`, ts);
   }
+  else if (type === 'publish_started') {
+    addEvent('publish', `Publishing ${data.repo_name}...`, ts);
+  }
+  else if (type === 'publish_completed') {
+    addEvent('publish', `Published: ${data.repo_url}`, ts);
+  }
+  else if (type === 'publish_failed') {
+    addEvent('publish', `Failed to publish ${data.repo_name}: ${(data.error || '').slice(0, 80)}`, ts);
+  }
 }
 
 // WebSocket connection with auto-reconnect

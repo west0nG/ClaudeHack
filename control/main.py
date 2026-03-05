@@ -27,6 +27,7 @@ from control.stages.stage0 import run_stage0
 from control.stages.stage1 import run_stage1
 from control.stages.stage2 import _run_card_pipeline, _slugify, run_stage2
 from control.stages.stage3 import _run_project_pipeline, _slugify_prd_dir, run_stage3
+from control.stages.stage4 import run_stage4
 from control.ws_server import WebSocketServer
 
 logging.basicConfig(
@@ -72,6 +73,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--skip-review", action="store_true", help="Skip manual review gate after Stage 1")
     parser.add_argument("--clean", action="store_true", help="Remove workspace/ before running (clear stale data)")
+    parser.add_argument("--skip-publish", action="store_true", help="Skip Stage 4 (GitHub publishing)")
+    parser.add_argument("--private", action="store_true", help="Create private GitHub repos instead of public")
     return parser.parse_args()
 
 
@@ -166,6 +169,19 @@ async def async_main() -> None:
             for d in project_dirs:
                 logger.info("  - %s", d)
             logger.info("=" * 60)
+
+            # Stage 4: Publish to GitHub
+            if project_dirs and not args.skip_publish:
+                logger.info("Starting Stage 4: Publishing %d projects to GitHub", len(project_dirs))
+                repo_urls = await run_stage4(
+                    project_dirs, event_bus, private=args.private,
+                    prd_dirs=[prd_dir] * len(project_dirs),
+                )
+                logger.info("=" * 60)
+                logger.info("Published %d repos:", len(repo_urls))
+                for url in repo_urls:
+                    logger.info("  - %s", url)
+                logger.info("=" * 60)
             return
 
         # ----------------------------------------------------------
@@ -322,6 +338,16 @@ async def async_main() -> None:
         for d in project_dirs:
             logger.info("  - %s", d)
         logger.info("=" * 60)
+
+        # Stage 4: Publish to GitHub
+        if project_dirs and not args.skip_publish:
+            logger.info("Starting Stage 4: Publishing %d projects to GitHub", len(project_dirs))
+            repo_urls = await run_stage4(project_dirs, event_bus, private=args.private)
+            logger.info("=" * 60)
+            logger.info("Published %d repos:", len(repo_urls))
+            for url in repo_urls:
+                logger.info("  - %s", url)
+            logger.info("=" * 60)
 
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
