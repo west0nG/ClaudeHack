@@ -32,6 +32,9 @@ def load_persistent(path: Path) -> dict[str, str]:
             key, _, value = line.partition("=")
             key = key.strip()
             value = value.strip()
+            # Strip surrounding quotes (KEY="value" or KEY='value')
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+                value = value[1:-1]
             if key:
                 creds[key] = value
     return creds
@@ -51,8 +54,10 @@ def save_persistent(path: Path, new_creds: dict[str, str]) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    is_new_file = not path.exists() or path.stat().st_size == 0
+
     with path.open("a", encoding="utf-8") as f:
-        if not path.exists() or path.stat().st_size == 0:
+        if is_new_file:
             f.write("# Persistent credential store (auto-managed by ConfigGate)\n")
         for key, value in sorted(to_add.items()):
             f.write(f"{key}={value}\n")
@@ -165,7 +170,19 @@ def diff_credentials(
     for category in ("carrier", "functional"):
         for dep in needed.get(category, []):
             env_var = dep.get("env_var", "")
+
             if not env_var:
+                # No env var extracted — can't check or collect.
+                # Carrier deps without env_var are still blockers (parser couldn't
+                # extract the variable name, so we can't satisfy it).
+                if category == "carrier":
+                    logger.warning(
+                        "Carrier dep '%s' has no env_var — treating as missing",
+                        dep.get("name", "unknown"),
+                    )
+                    result["missing_carrier"].append(dep)
+                # Functional deps without env_var are silently skipped (no way to
+                # collect them, and they're optional anyway).
                 continue
 
             if env_var in have and have[env_var]:

@@ -108,7 +108,9 @@ async def run_config_gate(
     new_creds: dict[str, str] = {}
 
     if still_need and not skip:
-        # Build a display-friendly list of what's needed
+        # Build a display-friendly list of what's needed.
+        # If the same env var is carrier in one project and functional in
+        # another, promote it to carrier (the stricter classification wins).
         needed_details: dict[str, dict] = {}  # env_var -> {name, category, obtain, projects}
         for slug, prereqs in all_prerequisites.items():
             for category in ("carrier", "functional"):
@@ -122,6 +124,10 @@ async def run_config_gate(
                                 "obtain": dep.get("obtain", ""),
                                 "projects": [],
                             }
+                        else:
+                            # Promote to carrier if any project treats it as carrier
+                            if category == "carrier":
+                                needed_details[env_var]["category"] = "carrier"
                         needed_details[env_var]["projects"].append(slug)
 
         new_creds = await _collect_credentials_cli(needed_details, already_have, persistent_creds)
@@ -156,8 +162,9 @@ async def run_config_gate(
 
         diff = diff_credentials(prereqs, merged_creds)
 
-        # Block if missing carrier deps
-        is_blocked = len(diff["missing_carrier"]) > 0
+        # Block if missing carrier deps (but not in skip mode — user chose
+        # to skip collection, so let everything through with best-effort creds)
+        is_blocked = len(diff["missing_carrier"]) > 0 and not skip
         env_plan = generate_env_plan(slug, diff, blocked=is_blocked)
 
         # Write environment-plan.md
