@@ -10,6 +10,7 @@ import asyncio
 import logging
 import re
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 from control.event_bus import EventBus
@@ -205,7 +206,8 @@ async def _publish_project(
         project_name = project_dir.parent.parent.name.replace("-", " ").title()
 
     slug = repo_slug_override or _slugify_project_name(project_name)
-    repo_name = f"hg-{slug}" if publish_mode == "test" else slug
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M")
+    repo_name = f"hg-{slug}-{timestamp}" if publish_mode == "test" else slug
 
     await event_bus.emit(Event(
         type="publish_started",
