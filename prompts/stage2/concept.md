@@ -60,6 +60,13 @@ For the chosen product_type, define:
 
 **Important**: Don't default to `web_app` out of habit. A code review tool is more naturally a `vscode_extension` or `github_app`. A team notification system is more naturally a `slack_app`. Choose the type that best fits the pain point.
 
+**Anti-pattern: Avoid defaulting to `web_app` with no external APIs.** A web_app that only uses localStorage and browser APIs is rarely solving a real pain point. Most real solutions need at least one of:
+- An AI/LLM API for intelligent processing (OpenAI, Claude, etc.)
+- A data source API for real information (news, weather, financial data, etc.)
+- A communication API for notifications/messaging (email, Slack webhook, etc.)
+
+If your chosen direction results in a pure frontend with no API calls, reconsider whether you've picked the right direction or product_type.
+
 ### Step 4: Define the Concept Layer
 
 Write a clear product concept with these elements:

@@ -49,7 +49,23 @@ The development plan specifies a `product_type`. Your scaffold, shared layer, an
 
 Follow the "Scaffold Steps" section from the Development Plan exactly. The steps vary by product_type:
 
-### For `web_app`:
+### For `web_app` (full-stack, with server/):
+If the technical plan has a `server/` directory:
+```bash
+mkdir demo && cd demo
+npm init -y
+npm install express cors dotenv
+npm install react react-dom react-router-dom
+npm install -D vite @vitejs/plugin-react tailwindcss @tailwindcss/vite
+```
+Then create:
+- `server/index.js` (Express server with `/api` routes + Vite dev middleware in dev mode)
+- `client/src/App.jsx` (React app with router)
+- `client/vite.config.js` (with proxy to Express server for `/api/*`)
+- Configure Tailwind, set up build scripts in `package.json`
+
+### For `web_app` (frontend-only, no server/):
+Only use this when the technical plan has NO `server/` directory:
 ```bash
 npm create vite@latest demo -- --template react
 cd demo && npm install
@@ -227,5 +243,6 @@ After ALL waves are complete:
 5. **Self-repair loops are mandatory** — always verify after writing code and fix errors before moving on.
 6. **All work happens inside the `demo/` subdirectory** — the scaffold creates it, all agents work within it.
 7. **Do not use `npm run dev`** — it starts a dev server that never exits and will cause the session to hang.
-8. **Follow the Development Plan** — the plan specifies exactly what to build. Don't improvise.
+8. **Full-stack web_app verification**: If the project has a `server/` directory, verify BOTH that `node server/index.js` starts without crash (test with a 3-second timeout) AND the client builds successfully. Use `"build": "vite build --outDir ../dist/client"` in the client's vite config.
+9. **Follow the Development Plan** — the plan specifies exactly what to build. Don't improvise.
 9. **README must have real run instructions** — a user following your README should be able to get the product running in a real environment.

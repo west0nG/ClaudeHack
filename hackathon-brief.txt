@@ -1,32 +1,8 @@
-🚀 Airia AI Agent Challenge
-Build the Future of Enterprise AI
-Join us for an exciting virtual hackathon where you'll create cutting-edge AI agents that transform how people work. Whether you're bringing AI directly into users' daily tools or building sophisticated multi-agent systems, this is your opportunity to showcase innovation that matters.
+What to Build
+Anything that removes friction from the software development lifecycle. Automate security fixes. Streamline code reviews. Generate compliance reports. Flag risks before they become problems.
 
-🎯 Challenge Tracks
-Track 1: Airia Everywhere
-Meet users where they already are.
-Build AI agents that seamlessly integrate into the platforms people use every day. No more context-switching, no more friction—just intelligent assistance exactly when and where it's needed.
+The best submissions will tell a story: here's the pain, here's how the agent solves it, here's what changes for developers.
 
-Target Platforms:
-🌐 Browser extensions
-📧 Outlook & email inboxes
-💬 Chat widgets
-💼 Slack & Microsoft Teams
-📁 SharePoint
-📱 WhatsApp
-🔌 Custom APIs for iterative workflows
+Chat alone won't qualify. We want to see agents that react to triggers and take action.
 
-Think: Personal AI assistants that live in your browser, email triaging bots, Slack integrations that automate team workflows, or browser extensions that enhance productivity across any web application.
-
-Track 2: Proactive Agents
-Orchestrate intelligence across your entire tech stack.
-Design sophisticated multi-agent workflows that autonomously gather data, make decisions, and perform actions across 2+ systems. Build the autonomous workforce of tomorrow.
-
-Key Capabilities:
-🤝 Multi-system integrations
-👤 Human-in-the-loop (HITL) decision points
-📄 Dynamic document generation
-🔄 Nested agent architectures
-⚡ Automated cross-platform workflows
-
-Think: Contract analysis pipelines, automated compliance monitoring systems, intelligent customer onboarding workflows, or research agents that synthesize information from multiple sources.
+At least one custom public agent or public flow should be created. See the resources tab to learn how to create custom agents & flows, and get inspired in what is possible to build.

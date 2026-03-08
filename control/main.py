@@ -152,6 +152,7 @@ async def async_main() -> None:
                 event_bus=event_bus,
                 skip=args.skip_config,
                 no_dashboard=args.no_dashboard,
+                ws_server=ws_server,
             )
 
             if not approved_dirs:
@@ -312,6 +313,7 @@ async def async_main() -> None:
             event_bus=event_bus,
             skip=args.skip_config,
             no_dashboard=args.no_dashboard,
+            ws_server=ws_server,
         )
 
         if not approved_dirs:

@@ -7,11 +7,169 @@ Two-layer credential architecture:
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import re
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Credential Validation
+# ---------------------------------------------------------------------------
+
+# Format patterns for known key types
+_FORMAT_PATTERNS: dict[str, re.Pattern[str]] = {
+    "OPENAI_API_KEY": re.compile(r"^sk-"),
+    "ANTHROPIC_API_KEY": re.compile(r"^sk-ant-"),
+    "GITHUB_TOKEN": re.compile(r"^(ghp_|github_pat_)"),
+    "SLACK_BOT_TOKEN": re.compile(r"^xoxb-"),
+    "SLACK_SIGNING_SECRET": re.compile(r"^[0-9a-f]{32}$"),
+}
+
+# Human-readable format hints
+_FORMAT_HINTS: dict[str, str] = {
+    "OPENAI_API_KEY": "must start with 'sk-'",
+    "ANTHROPIC_API_KEY": "must start with 'sk-ant-'",
+    "GITHUB_TOKEN": "must start with 'ghp_' or 'github_pat_'",
+    "SLACK_BOT_TOKEN": "must start with 'xoxb-'",
+    "SLACK_SIGNING_SECRET": "must be 32 lowercase hex characters",
+}
+
+
+def _format_check(env_var: str, value: str) -> str | None:
+    """Return error message if format is wrong, None if OK."""
+    pattern = _FORMAT_PATTERNS.get(env_var)
+    if pattern is None:
+        return None  # No known format — skip
+    if not pattern.match(value):
+        hint = _FORMAT_HINTS.get(env_var, "invalid format")
+        return f"Format error: {hint}"
+    return None
+
+
+def _do_ping(env_var: str, value: str) -> str | None:
+    """Synchronous ping check. Returns error message or None on success.
+
+    Called via run_in_executor to avoid blocking the event loop.
+    """
+    try:
+        if env_var == "OPENAI_API_KEY":
+            req = urllib.request.Request(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {value}"},
+            )
+            urllib.request.urlopen(req, timeout=4)
+            return None
+
+        elif env_var == "ANTHROPIC_API_KEY":
+            req = urllib.request.Request(
+                "https://api.anthropic.com/v1/models",
+                headers={
+                    "x-api-key": value,
+                    "anthropic-version": "2023-06-01",
+                },
+            )
+            urllib.request.urlopen(req, timeout=4)
+            return None
+
+        elif env_var == "GITHUB_TOKEN":
+            req = urllib.request.Request(
+                "https://api.github.com/user",
+                headers={
+                    "Authorization": f"Bearer {value}",
+                    "Accept": "application/vnd.github+json",
+                },
+            )
+            urllib.request.urlopen(req, timeout=4)
+            return None
+
+        elif env_var == "SLACK_BOT_TOKEN":
+            data = urllib.parse.urlencode({"token": value}).encode()
+            req = urllib.request.Request(
+                "https://slack.com/api/auth.test",
+                data=data,
+                method="POST",
+            )
+            resp = urllib.request.urlopen(req, timeout=4)
+            body = json.loads(resp.read())
+            if not body.get("ok"):
+                return f"Slack API error: {body.get('error', 'unknown')}"
+            return None
+
+        else:
+            return None  # No ping for this key type
+
+    except urllib.error.HTTPError as e:
+        status = e.code
+        if status == 401:
+            return "Authentication failed: invalid or expired key"
+        elif status == 403:
+            return "Authorization failed: key lacks required permissions"
+        else:
+            return f"API returned HTTP {status}"
+    except urllib.error.URLError:
+        logger.debug("Network error pinging %s endpoint — skipping ping check", env_var)
+        return None  # Cannot reach server, do not penalise the key
+    except Exception:
+        logger.debug("Unexpected ping error for %s", env_var, exc_info=True)
+        return None  # Don't penalise the key on unexpected errors
+
+
+# Keys that support network ping validation
+_PINGABLE_KEYS = {"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GITHUB_TOKEN", "SLACK_BOT_TOKEN"}
+
+
+async def validate_credential(env_var: str, value: str) -> dict:
+    """Validate a single credential.
+
+    Returns:
+        {
+            "valid": bool,
+            "error": str | None,     # human-readable error on failure
+            "warning": str | None,   # non-blocking warning
+            "skipped": bool,         # True if no validator exists for this key type
+        }
+    """
+    result = {"valid": True, "error": None, "warning": None, "skipped": False}
+
+    # Check if we have any validator for this key
+    has_format = env_var in _FORMAT_PATTERNS
+    has_ping = env_var in _PINGABLE_KEYS
+
+    if not has_format and not has_ping:
+        result["skipped"] = True
+        return result
+
+    # Step 1: Format check (instant)
+    fmt_error = _format_check(env_var, value)
+    if fmt_error:
+        result["valid"] = False
+        result["error"] = fmt_error
+        return result
+
+    # Step 2: Network ping (if available)
+    if has_ping:
+        loop = asyncio.get_running_loop()
+        try:
+            ping_error = await asyncio.wait_for(
+                loop.run_in_executor(None, _do_ping, env_var, value),
+                timeout=5.0,
+            )
+        except asyncio.TimeoutError:
+            result["warning"] = "Validation timed out (5s) — accepted anyway"
+            return result
+
+        if ping_error:
+            result["valid"] = False
+            result["error"] = ping_error
+            return result
+
+    return result
 
 
 def load_persistent(path: Path) -> dict[str, str]:

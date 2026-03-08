@@ -94,6 +94,49 @@
   #btn-approve-all { background: #1f6feb; color: #fff; }
   #btn-approve-all:hover { background: #388bfd; }
   .queue-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ConfigGate panel */
+  #config-panel { display: none; margin-bottom: 20px; padding: 16px; background: #161b22; border: 2px solid #1f6feb; border-radius: 8px; }
+  #config-panel.active { display: block; }
+  #config-panel h2 { color: #58a6ff; font-size: 1.1em; margin-bottom: 4px; }
+  #config-panel .config-subtitle { color: #8b949e; font-size: 0.85em; margin-bottom: 14px; }
+  .config-section { margin-bottom: 16px; }
+  .config-section-title { font-size: 0.85em; font-weight: 600; margin-bottom: 8px; padding: 4px 0; }
+  .config-section-title.carrier { color: #f0883e; }
+  .config-section-title.functional { color: #8b949e; }
+  .config-section-title.satisfied { color: #3fb950; }
+  .cred-item { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin-bottom: 10px; padding: 10px 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; }
+  .cred-item.satisfied { opacity: 0.6; }
+  .cred-label { flex: 1; min-width: 200px; }
+  .cred-var { font-weight: 600; font-size: 0.9em; color: #c9d1d9; font-family: monospace; }
+  .cred-desc { font-size: 0.78em; color: #8b949e; margin-top: 2px; }
+  .cred-obtain { font-size: 0.75em; color: #484f58; margin-top: 2px; }
+  .cred-projects { font-size: 0.72em; color: #6e7681; margin-top: 2px; }
+  .cred-input { flex: 1; min-width: 250px; }
+  .cred-input input { width: 100%; padding: 6px 10px; background: #0d1117; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; font-family: monospace; font-size: 0.85em; }
+  .cred-input input:focus { border-color: #58a6ff; outline: none; }
+  .cred-input input::placeholder { color: #484f58; }
+  .config-actions { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+  .config-actions button { padding: 8px 20px; border-radius: 6px; border: none; cursor: pointer; font-weight: 600; font-size: 0.9em; }
+  #btn-config-confirm { background: #238636; color: #fff; }
+  #btn-config-confirm:hover { background: #2ea043; }
+  #btn-config-skip { background: #30363d; color: #c9d1d9; }
+  #btn-config-skip:hover { background: #484f58; }
+  .config-count { color: #8b949e; font-size: 0.85em; margin-left: 8px; }
+  #config-panel.confirmed { border-color: #3fb950; opacity: 0.6; pointer-events: none; }
+  #config-panel.confirmed h2 { color: #3fb950; }
+
+  /* Validation status indicators */
+  .cred-validation { display: flex; align-items: center; gap: 6px; margin-top: 4px; min-height: 20px; }
+  .cred-validation .val-spinner { width: 14px; height: 14px; border: 2px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .cred-validation .val-ok { color: #3fb950; font-size: 0.82em; }
+  .cred-validation .val-err { color: #f85149; font-size: 0.82em; }
+  .cred-validation .val-warn { color: #d29922; font-size: 0.82em; }
+  .cred-validation .val-skip { color: #8b949e; font-size: 0.82em; }
+  .btn-validate { padding: 4px 10px; background: #30363d; color: #c9d1d9; border: 1px solid #484f58; border-radius: 4px; cursor: pointer; font-size: 0.78em; margin-top: 4px; }
+  .btn-validate:hover { background: #484f58; }
+  .config-warning-count { color: #d29922; font-size: 0.82em; margin-left: 8px; }
 </style>
 </head>
 <body>
@@ -121,6 +164,34 @@
     <button id="btn-reject" onclick="respondCard('reject')">Reject</button>
     <button id="btn-approve-all" onclick="respondCard('approve_all')">Approve All Remaining</button>
     <span class="review-count" id="review-count"></span>
+  </div>
+</div>
+
+<!-- ConfigGate Panel (hidden by default) -->
+<div id="config-panel">
+  <h2>ConfigGate: API Credentials</h2>
+  <div class="config-subtitle">Fill in the required API keys. Projects missing carrier dependencies will be blocked.</div>
+
+  <div id="config-satisfied" class="config-section" style="display:none;">
+    <div class="config-section-title satisfied">✅ Already Satisfied</div>
+    <div id="config-satisfied-list"></div>
+  </div>
+
+  <div id="config-carrier" class="config-section" style="display:none;">
+    <div class="config-section-title carrier">🔑 Required (carrier) — projects blocked without these</div>
+    <div id="config-carrier-list"></div>
+  </div>
+
+  <div id="config-functional" class="config-section" style="display:none;">
+    <div class="config-section-title functional">🔧 Optional (functional) — features skipped if missing</div>
+    <div id="config-functional-list"></div>
+  </div>
+
+  <div class="config-actions">
+    <button id="btn-config-confirm" onclick="submitConfig()">Confirm & Continue</button>
+    <button id="btn-config-skip" onclick="submitConfig(true)">Skip All</button>
+    <span class="config-count" id="config-count"></span>
+    <span class="config-warning-count" id="config-warning-count" style="display:none"></span>
   </div>
 </div>
 
@@ -319,6 +390,179 @@ function updateQueueCount() {
     `${approvedCount} approved, ${rejectedCount} rejected, ${remaining} remaining`;
 }
 
+// ---- ConfigGate Logic ----
+
+let configCredentials = [];  // [{env_var, name, obtain, projects, category}]
+
+function showConfigPanel(data) {
+  const panel = document.getElementById('config-panel');
+  panel.classList.add('active');
+  configCredentials = [];
+
+  // Satisfied
+  const satisfiedList = document.getElementById('config-satisfied-list');
+  const satisfiedSection = document.getElementById('config-satisfied');
+  satisfiedList.innerHTML = '';
+  if (data.satisfied && data.satisfied.length > 0) {
+    satisfiedSection.style.display = 'block';
+    data.satisfied.forEach(s => {
+      const el = document.createElement('div');
+      el.className = 'cred-item satisfied';
+      el.innerHTML = `<div class="cred-label"><span class="cred-var">${escHtml(s.env_var)}</span></div>`;
+      satisfiedList.appendChild(el);
+    });
+  }
+
+  // Carrier
+  const carrierList = document.getElementById('config-carrier-list');
+  const carrierSection = document.getElementById('config-carrier');
+  carrierList.innerHTML = '';
+  if (data.carrier && data.carrier.length > 0) {
+    carrierSection.style.display = 'block';
+    data.carrier.forEach(c => {
+      configCredentials.push({...c, category: 'carrier'});
+      carrierList.appendChild(createCredInput(c));
+    });
+  }
+
+  // Functional
+  const funcList = document.getElementById('config-functional-list');
+  const funcSection = document.getElementById('config-functional');
+  funcList.innerHTML = '';
+  if (data.functional && data.functional.length > 0) {
+    funcSection.style.display = 'block';
+    data.functional.forEach(f => {
+      configCredentials.push({...f, category: 'functional'});
+      funcList.appendChild(createCredInput(f));
+    });
+  }
+
+  updateConfigCount();
+}
+
+function createCredInput(cred) {
+  const el = document.createElement('div');
+  el.className = 'cred-item';
+  el.innerHTML = `
+    <div class="cred-label">
+      <div class="cred-var">${escHtml(cred.env_var)}</div>
+      <div class="cred-desc">${escHtml(cred.name)}</div>
+      ${cred.obtain ? `<div class="cred-obtain">Obtain: ${escHtml(cred.obtain)}</div>` : ''}
+      <div class="cred-projects">Used by: ${(cred.projects || []).map(escHtml).join(', ')}</div>
+    </div>
+    <div class="cred-input">
+      <input type="text" id="cred-${cred.env_var}" placeholder="${cred.env_var}"
+             oninput="updateConfigCount(); clearValidation('${cred.env_var}')"
+             onblur="validateCredField('${cred.env_var}')">
+      <div class="cred-validation" id="val-${cred.env_var}"></div>
+    </div>
+  `;
+  return el;
+}
+
+function updateConfigCount() {
+  let filled = 0;
+  configCredentials.forEach(c => {
+    const input = document.getElementById('cred-' + c.env_var);
+    if (input && input.value.trim()) filled++;
+  });
+  document.getElementById('config-count').textContent =
+    `${filled} / ${configCredentials.length} filled`;
+}
+
+// Track validation state per field
+let validationResults = {};  // env_var -> {valid, error, warning, skipped}
+
+function validateCredField(envVar) {
+  const input = document.getElementById('cred-' + envVar);
+  if (!input || !input.value.trim()) return;
+
+  const valEl = document.getElementById('val-' + envVar);
+  if (!valEl) return;
+
+  // Show spinner
+  valEl.innerHTML = '<div class="val-spinner"></div>';
+
+  // Send validation request to server
+  if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+    wsConnection.send(JSON.stringify({
+      type: 'config_validate_request',
+      env_var: envVar,
+      value: input.value.trim(),
+    }));
+  } else {
+    valEl.innerHTML = '<span class="val-warn">⚠️ Not connected</span>';
+  }
+}
+
+function clearValidation(envVar) {
+  const valEl = document.getElementById('val-' + envVar);
+  if (valEl) valEl.innerHTML = '';
+  delete validationResults[envVar];
+  updateConfigWarnings();
+}
+
+function handleValidateResponse(data) {
+  const envVar = data.env_var;
+  const valEl = document.getElementById('val-' + envVar);
+  if (!valEl) return;
+
+  validationResults[envVar] = data;
+
+  if (data.skipped) {
+    valEl.innerHTML = '<span class="val-skip">— no validator</span>';
+  } else if (data.valid) {
+    if (data.warning) {
+      valEl.innerHTML = `<span class="val-warn">⚠️ ${escHtml(data.warning)}</span>`;
+    } else {
+      valEl.innerHTML = '<span class="val-ok">✅ Valid</span>';
+    }
+  } else {
+    valEl.innerHTML = `<span class="val-err">❌ ${escHtml(data.error)}</span>`;
+  }
+  updateConfigWarnings();
+}
+
+function updateConfigWarnings() {
+  const failures = Object.values(validationResults).filter(r => !r.valid && !r.skipped);
+  const warnEl = document.getElementById('config-warning-count');
+  if (!warnEl) return;
+  if (failures.length > 0) {
+    warnEl.textContent = `⚠️ ${failures.length} validation failure${failures.length > 1 ? 's' : ''}`;
+    warnEl.style.display = 'inline';
+  } else {
+    warnEl.textContent = '';
+    warnEl.style.display = 'none';
+  }
+}
+
+function submitConfig(skipAll) {
+  const credentials = {};
+  if (!skipAll) {
+    configCredentials.forEach(c => {
+      const input = document.getElementById('cred-' + c.env_var);
+      if (input && input.value.trim()) {
+        credentials[c.env_var] = input.value.trim();
+      }
+    });
+  }
+
+  // Send to server
+  if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+    wsConnection.send(JSON.stringify({
+      type: 'config_response',
+      credentials: credentials,
+    }));
+  }
+
+  // Mark panel as confirmed
+  const panel = document.getElementById('config-panel');
+  panel.classList.add('confirmed');
+  const count = Object.keys(credentials).length;
+  document.querySelector('#config-panel h2').textContent =
+    skipAll ? 'ConfigGate: Skipped' : `ConfigGate: ${count} credentials submitted`;
+}
+
 // ---- Event Handling ----
 
 function handleEvent(ev) {
@@ -396,6 +640,18 @@ function handleEvent(ev) {
   else if (type === 'review_completed') {
     // Legacy batch review completed
     finishReviewQueue({ approved: data.selected, rejected: (data.total || 0) - (data.selected || 0) });
+  }
+  else if (type === 'config_requested') {
+    showConfigPanel(data);
+  }
+  else if (type === 'config_validate_response') {
+    handleValidateResponse(data);
+  }
+  else if (type === 'config_collected') {
+    addEvent('config', `Collected ${data.count} credentials`, ts);
+  }
+  else if (type === 'config_blocked') {
+    addEvent('config', `BLOCKED ${data.slug}: missing ${(data.missing || []).join(', ')}`, ts);
   }
   else if (type === 'dev_completed') {
     const s = getOrCreateSession(data.session_id);

@@ -4,12 +4,18 @@ Sits between Stage 2 (PRD generation) and Stage 3 (Demo development).
 Parses Prerequisites Checklists from technical.md, diffs against the persistent
 credential store, prompts for missing credentials, and generates per-project
 environment plans.
+
+Supports two collection modes:
+  - Dashboard: emits config_requested event, renders form in browser, waits for
+    config_response WebSocket message.
+  - CLI: interactive input() prompts in the terminal.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import sys
+import time
 from pathlib import Path
 
 from control.credential_store import (
@@ -18,6 +24,7 @@ from control.credential_store import (
     load_persistent,
     parse_prerequisites,
     save_persistent,
+    validate_credential,
 )
 from control.event_bus import EventBus
 from control.models import Event
@@ -28,6 +35,9 @@ logger = logging.getLogger(__name__)
 STAGE2_5_DIR = PROJECT_ROOT / "workspace" / "stage2.5"
 PERSISTENT_CREDS_PATH = PROJECT_ROOT / "credentials.env"
 
+# Timeout for waiting on user credential input (10 minutes)
+CONFIG_TIMEOUT_SECONDS = 600
+
 
 async def run_config_gate(
     prd_dirs: list[Path],
@@ -35,6 +45,7 @@ async def run_config_gate(
     persistent_creds_path: Path | None = None,
     skip: bool = False,
     no_dashboard: bool = True,
+    ws_server: "WebSocketServer | None" = None,
 ) -> tuple[list[Path], dict[str, str]]:
     """Run ConfigGate: parse prerequisites, collect credentials, generate env plans.
 
@@ -44,6 +55,7 @@ async def run_config_gate(
         persistent_creds_path: Path to persistent credentials.env (default: project root).
         skip: If True, skip interactive collection — use only what's in persistent store.
         no_dashboard: If True, use CLI mode for credential collection.
+        ws_server: WebSocket server for dashboard interaction (None = CLI mode).
 
     Returns:
         Tuple of (approved_prd_dirs, merged_credentials).
@@ -130,7 +142,14 @@ async def run_config_gate(
                                 needed_details[env_var]["category"] = "carrier"
                         needed_details[env_var]["projects"].append(slug)
 
-        new_creds = await _collect_credentials_cli(needed_details, already_have, persistent_creds)
+        if ws_server and not no_dashboard:
+            new_creds = await _collect_credentials_dashboard(
+                needed_details, already_have, event_bus, ws_server,
+            )
+        else:
+            new_creds = await _collect_credentials_cli(
+                needed_details, already_have,
+            )
 
     elif still_need and skip:
         logger.info("ConfigGate: --skip-config active, using only persistent store (%d keys)", len(persistent_creds))
@@ -206,21 +225,118 @@ async def run_config_gate(
     return approved_dirs, merged_creds
 
 
+# ---------------------------------------------------------------------------
+# Dashboard mode: WebSocket-based credential collection
+# ---------------------------------------------------------------------------
+
+async def _collect_credentials_dashboard(
+    needed_details: dict[str, dict],
+    already_have: set[str],
+    event_bus: EventBus,
+    ws_server: "WebSocketServer",
+) -> dict[str, str]:
+    """Collect missing credentials via Dashboard WebSocket UI.
+
+    Emits config_requested event, waits for config_response message from
+    the dashboard containing filled-in credential values.
+    """
+    # Build serializable payload for the dashboard
+    satisfied = [{"env_var": v} for v in sorted(already_have)]
+
+    carrier_list = []
+    functional_list = []
+    for env_var, detail in sorted(needed_details.items()):
+        entry = {
+            "env_var": env_var,
+            "name": detail["name"],
+            "obtain": detail.get("obtain", ""),
+            "projects": detail["projects"],
+        }
+        if detail["category"] == "carrier":
+            carrier_list.append(entry)
+        else:
+            functional_list.append(entry)
+
+    await event_bus.emit(Event(
+        type="config_requested",
+        data={
+            "satisfied": satisfied,
+            "carrier": carrier_list,
+            "functional": functional_list,
+        },
+    ))
+
+    logger.info(
+        "Waiting for credential input from dashboard (%d carrier, %d functional, %ds timeout)...",
+        len(carrier_list), len(functional_list), CONFIG_TIMEOUT_SECONDS,
+    )
+
+    # Register validation handler so dashboard can validate individual keys.
+    # NOTE: ws_server._dispatch_message calls handlers synchronously, so this
+    # must be a regular function that schedules async work via create_task.
+    def handle_validate_request(message: dict) -> None:
+        env_var = message.get("env_var", "")
+        value = message.get("value", "")
+
+        async def _do_validate() -> None:
+            result = await validate_credential(env_var, value)
+            await event_bus.emit(Event(
+                type="config_validate_response",
+                data={"env_var": env_var, **result},
+            ))
+
+        asyncio.create_task(_do_validate())
+
+    ws_server.register_handler("config_validate_request", handle_validate_request)
+
+    # Wait for dashboard response
+    loop = asyncio.get_running_loop()
+    response_future: asyncio.Future[dict] = loop.create_future()
+
+    def handle_config_response(message: dict) -> None:
+        if not response_future.done():
+            response_future.set_result(message)
+
+    ws_server.register_handler("config_response", handle_config_response)
+
+    try:
+        response = await asyncio.wait_for(
+            response_future, timeout=CONFIG_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("ConfigGate dashboard timeout — proceeding with no new credentials")
+        return {}
+    finally:
+        ws_server.unregister_handler("config_response")
+        ws_server.unregister_handler("config_validate_request")
+
+    # Extract credentials from response: {credentials: {ENV_VAR: "value", ...}}
+    new_creds: dict[str, str] = {}
+    raw_creds = response.get("credentials", {})
+    for env_var, value in raw_creds.items():
+        value = str(value).strip()
+        if value:
+            new_creds[env_var] = value
+
+    logger.info("Dashboard provided %d credentials", len(new_creds))
+
+    await event_bus.emit(Event(
+        type="config_collected",
+        data={"count": len(new_creds)},
+    ))
+
+    return new_creds
+
+
+# ---------------------------------------------------------------------------
+# CLI mode: interactive terminal-based credential collection
+# ---------------------------------------------------------------------------
+
 async def _collect_credentials_cli(
     needed_details: dict[str, dict],
     already_have: set[str],
-    persistent_creds: dict[str, str],
 ) -> dict[str, str]:
-    """Collect missing credentials via CLI interactive prompt.
-
-    Args:
-        needed_details: env_var -> {name, category, obtain, projects}
-        already_have: Set of env var names already satisfied
-        persistent_creds: Current persistent store contents
-
-    Returns:
-        Dict of newly collected credentials (env_var -> value).
-    """
+    """Collect missing credentials via CLI interactive prompt."""
     new_creds: dict[str, str] = {}
 
     print("\n" + "=" * 60)
@@ -244,7 +360,7 @@ async def _collect_credentials_cli(
                 print(f"     Obtain: {detail['obtain']}")
             print(f"     Used by: {', '.join(detail['projects'])}")
 
-            value = _prompt_credential(env_var)
+            value = await _prompt_and_validate(env_var, required=True)
             if value:
                 new_creds[env_var] = value
 
@@ -256,7 +372,7 @@ async def _collect_credentials_cli(
                 print(f"     Obtain: {detail['obtain']}")
             print(f"     Used by: {', '.join(detail['projects'])}")
 
-            value = _prompt_credential(env_var, required=False)
+            value = await _prompt_and_validate(env_var, required=False)
             if value:
                 new_creds[env_var] = value
 
@@ -278,6 +394,49 @@ def _prompt_credential(env_var: str, required: bool = True) -> str:
         print()
         return ""
     return value
+
+
+async def _prompt_and_validate(
+    env_var: str,
+    required: bool,
+    max_attempts: int = 3,
+) -> str:
+    """Prompt for a credential and validate it, with retries on failure.
+
+    Returns the accepted value, or empty string if skipped.
+    """
+    loop = asyncio.get_running_loop()
+    for attempt in range(1, max_attempts + 1):
+        value = await loop.run_in_executor(
+            None, _prompt_credential, env_var, required,
+        )
+        if not value:
+            return ""
+
+        # Validate
+        print("     Validating...", end="", flush=True)
+        result = await validate_credential(env_var, value)
+
+        if result["skipped"]:
+            print(" skipped (no validator for this key type)")
+            return value
+
+        if result["valid"]:
+            if result["warning"]:
+                print(f" ⚠️  {result['warning']}")
+            else:
+                print(" ✅ valid")
+            return value
+
+        # Validation failed
+        print(f" ❌ {result['error']}")
+        if attempt < max_attempts:
+            print(f"     Please try again ({max_attempts - attempt} attempts remaining)")
+        else:
+            print("     Max attempts reached — accepting value with warning")
+            return value
+
+    return ""
 
 
 def _write_run_credentials(

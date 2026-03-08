@@ -70,7 +70,7 @@ Define the concrete data structures used throughout the app:
 
 Define the file tree appropriate for the product_type. Examples:
 
-**For `web_app`:**
+**For `web_app` (frontend-only, rare — only if product truly needs no backend):**
 ```
 demo/
 ├── src/
@@ -86,6 +86,30 @@ demo/
 ├── package.json
 ├── .env.example
 └── vite.config.js
+```
+
+**For `web_app` (full-stack — most web_app projects should use this):**
+```
+demo/
+├── client/
+│   ├── src/
+│   │   ├── components/
+│   │   ├── pages/
+│   │   ├── hooks/
+│   │   ├── services/      # API call wrappers (fetch to /api/*)
+│   │   ├── App.jsx
+│   │   ├── main.jsx
+│   │   └── index.css
+│   ├── index.html
+│   └── vite.config.js
+├── server/
+│   ├── index.js           # Express server + Vite dev middleware
+│   ├── routes/             # API route handlers
+│   ├── services/           # Business logic + external API calls
+│   └── utils/
+├── package.json
+├── .env.example
+└── README.md
 ```
 
 **For `slack_app`:**

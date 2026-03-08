@@ -74,7 +74,7 @@ Drop any direction that requires:
 - **Restricted/sensitive data** (medical records, financial data, children's data under COPPA)
 - **Multi-month integrations** (ERP systems, enterprise SSO)
 - **Safety-critical systems** (medical dosing, autonomous driving, structural engineering)
-- **Deep domain expertise** that an AI agent couldn't reasonably simulate in a demo
+- **Deep domain expertise** that an AI agent couldn't reasonably acquire or apply
 
 ---
 
@@ -84,7 +84,7 @@ For each persona, list 2-3 hypothesized pain areas. Each pain area must be:
 
 1. **Specific**: Not "communication is hard" but "coordinating shift swaps with coworkers who don't check the group chat"
 2. **Observable online**: Someone could plausibly find Reddit/Twitter/forum posts about this
-3. **Potentially solvable in a hackathon**: A working demo addressing this pain could be built in hours with web technologies
+3. **Potentially solvable in a hackathon**: A working demo addressing this pain could be built in hours with software (web app, API service, Slack bot, CLI tool, browser extension, etc.)
 
 **GOOD pain areas**:
 - "Manually cross-referencing ingredient lists across multiple suppliers' PDF catalogs"
@@ -95,6 +95,17 @@ For each persona, list 2-3 hypothesized pain areas. Each pain area must be:
 - "Stress" — too vague, not actionable
 - "Need better tools" — not a pain point, it's a solution category
 - "Company culture is bad" — not solvable with software
+
+### Solution Scope Diversity
+
+Your 10 directions should naturally lead to diverse product types — not just browser-based dashboards. Consider pain points that are best solved by:
+- **API-backed web apps** (real data processing, AI features via OpenAI/Claude API)
+- **Slack/Discord bots** (team workflow automation)
+- **CLI tools** (developer productivity)
+- **Browser extensions** (augmenting existing web experiences)
+- **Backend services** (webhook processing, data pipelines)
+
+If all 10 directions would result in the same type of product (e.g., all static web dashboards), your directions lack diversity.
 
 ---
 
