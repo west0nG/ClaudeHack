@@ -115,12 +115,16 @@ async def async_main() -> None:
     effective_concurrent = 1 if args.mode == "lite" else args.max_concurrent
     session_mgr = SessionManager(max_concurrent=effective_concurrent, event_bus=event_bus)
 
-    # Clean workspace if requested
-    if args.clean:
-        workspace_dir = PROJECT_ROOT / "workspace"
-        if workspace_dir.exists():
+    # Archive stale workspace from previous run (if any)
+    # This handles the case where a previous run was killed before reaching finally.
+    workspace_dir = PROJECT_ROOT / "workspace"
+    if workspace_dir.exists() and any(workspace_dir.iterdir()):
+        if args.clean:
             logger.info("Cleaning workspace: %s", workspace_dir)
             shutil.rmtree(workspace_dir)
+        else:
+            logger.info("Found stale workspace from previous run, archiving first")
+            _archive_workspace()
 
     try:
         # ----------------------------------------------------------
