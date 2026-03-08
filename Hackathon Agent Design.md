@@ -36,6 +36,7 @@ Hackathon Agent 是一个完全自主的 AI 黑客松参赛系统。它不是辅
 - 产品方案文档（concept.md + logic.md + technical.md）
 - 环境配置说明（environment-plan.md + `.env.example`）
 - 部署/安装说明（README.md，包含真实运行的完整步骤）
+- **Pitch 演示材料**（pitch-script.md + pitch-deck.html）
 
 各项目之间完全独立，无任何关联，可分别参加不同的黑客松。
 
@@ -43,7 +44,7 @@ Hackathon Agent 是一个完全自主的 AI 黑客松参赛系统。它不是辅
 
 ## 2. 整体架构
 
-### 2.1 六阶段流水线
+### 2.1 七阶段流水线
 
 ```
 用户输入
@@ -53,8 +54,9 @@ Hackathon Agent 是一个完全自主的 AI 黑客松参赛系统。它不是辅
   → [Stage 2：产品方案]
   → [ConfigGate：凭证收集 + 可行性验证]
   → [Stage 3：真实环境开发]
-  → [Stage 4：GitHub 发布]
-  → 5-7 个 GitHub 仓库
+  → [Stage 5：Pitch Deck]（pitch 产出复制到 demo/ 目录）
+  → [Stage 4：GitHub 发布]（含 pitch 产出）
+  → 5-7 个 GitHub 仓库（代码 + pitch-script.md + pitch-deck.html）
 ```
 
 关键设计：
@@ -63,6 +65,7 @@ Hackathon Agent 是一个完全自主的 AI 黑客松参赛系统。它不是辅
 - **ConfigGate（Stage 2.5）** 重新定位：不是"让 demo 更好看的可选步骤"，而是"验证产品能否真实存在的必要关卡"——无法满足载体依赖的项目直接 BLOCKED，不进入 Stage 3
 - **Stage 3** 开发目标从"构建成功"改为"在真实环境里跑通核心路径"
 - **Stage 4** 自动 README 生成 + git init + GitHub repo 创建 + push
+- **Stage 5** 为每个项目生成 pitch 演讲脚本 + HTML 幻灯片，产出复制到 demo/ 后由 Stage 4 一起发布
 
 ### 2.2 中控架构
 
@@ -920,8 +923,9 @@ for prd in prd_docs:
 10. Stage 2: 为每张 Idea Card 串行启动 3 个 session（concept → logic → technical）→ 收集文档到 workspace/stage2/output/
 11. [可选] ConfigGate: 依赖分析 → 凭证收集 → 环境规划（🆕）
 12. Stage 3: 为每份 PRD 串行启动 3 个 session（Plan → Dev → Review），含条件性 C→B 打回 → 收集项目目录
-13. Stage 4: 为每个成功项目并行执行 README 生成 + git init + gh repo create + push
-14. 全程通过 EventBus → WebSocket 双向通信 Dashboard
+13. Stage 5: 为每个成功项目生成 pitch-script.md + pitch-deck.html，复制到 demo/ 目录
+14. Stage 4: 发布到 GitHub（含 pitch 产出）
+15. 全程通过 EventBus → WebSocket 双向通信 Dashboard
 ```
 
 ### 11.3 Session 管理 ✅ 已实现
@@ -955,7 +959,8 @@ hackathon-agent/
 │       ├── stage2.py            # 阶段二：PRD 生成编排
 │       ├── stage2_5.py          # 🆕 ConfigGate 编排
 │       ├── stage3.py            # 阶段三：Demo 开发编排（product_type 感知 + 凭证注入）
-│       └── stage4.py            # 阶段四：GitHub 发布 (git/gh, 无 AI session)
+│       ├── stage4.py            # 阶段四：GitHub 发布 (git/gh, 无 AI session)
+│       └── stage5.py            # 阶段五：Pitch Deck 生成编排
 │
 ├── dashboard.html               # 单文件监控 + 交互页面（含 ReviewGate UI + ConfigGate UI）
 │
@@ -972,10 +977,13 @@ hackathon-agent/
 │   │   └── technical.md         # Session 3: 技术栈 + Prerequisites Checklist + 部署说明
 │   ├── stage2_5/
 │   │   └── env_planner.md       # 🆕 根据收集到的凭证生成 environment-plan.md
-│   └── stage3/
-│       ├── plan.md              # Session A: product_type 感知的开发规划
-│       ├── dev.md               # Session B: Scaffold 分支 + 不 Mock 原则 + Module Coding
-│       └── review.md            # Session C: product_type 感知的验收 + Designer + Fix
+│   ├── stage3/
+│   │   ├── plan.md              # Session A: product_type 感知的开发规划
+│   │   ├── dev.md               # Session B: Scaffold 分支 + 不 Mock 原则 + Module Coding
+│   │   └── review.md            # Session C: product_type 感知的验收 + Designer + Fix
+│   └── stage5/
+│       ├── storyteller.md       # Session 1: Pitch 叙事脚本生成
+│       └── deck-builder.md      # Session 2: HTML 幻灯片构建
 │
 ├── templates/
 │   ├── idea-card.md             # Idea Card 模板（含外部依赖评估）
@@ -1007,14 +1015,24 @@ hackathon-agent/
 │   │   └── {card-slug}/
 │   │       ├── credentials-needed.md
 │   │       └── environment-plan.md
-│   └── stage3/
-│       └── {prd-slug}/
-│           ├── plan/            # Session A 工作目录 (dev-plan.md)
-│           └── dev/             # Session B+C 共享工作目录
-│               └── demo/        # 产出项目
-│                   ├── .env.example  # 字段名，不含值
-│                   ├── README.md     # 含真实运行步骤
-│                   └── [项目代码]
+│   ├── stage3/
+│   │   └── {prd-slug}/
+│   │       ├── plan/            # Session A 工作目录 (dev-plan.md)
+│   │       └── dev/             # Session B+C 共享工作目录
+│   │           └── demo/        # 产出项目
+│   │               ├── .env.example  # 字段名，不含值
+│   │               ├── README.md     # 含真实运行步骤
+│   │               └── [项目代码]
+│   └── stage5/                  # 🆕
+│       ├── {slug}/
+│       │   ├── storyteller/     # Session 1 工作目录
+│       │   │   ├── demo -> symlink  # 指向 Stage 3 demo/
+│       │   │   └── pitch-script.md
+│       │   └── deck/            # Session 2 工作目录
+│       │       └── pitch-deck.html
+│       └── output/{slug}/       # 最终产出
+│           ├── pitch-script.md
+│           └── pitch-deck.html
 │
 ├── .venv/                       # Python 虚拟环境
 ├── requirements.txt             # websockets, aiofiles, python-dotenv
@@ -1050,6 +1068,8 @@ hackathon-agent/
 | 三 | ├ Reviewer Agent | (内部) | 功能检查 + 真实环境验证 | Agent tool sub-agent |
 | 三 | └ Designer Agent | (内部) | 视觉一致性（有 UI 的 product_type）| Agent tool sub-agent |
 | 四 | — | — | 确定性操作：README + git + gh（无 AI session）| Shell commands |
+| 五 | Storyteller | 每项目 1 个 | 读 PRD + demo 源码，搜索 hook，写 pitch-script.md | Claude Code session |
+| 五 | Deck Builder | 每项目 1 个 | 将 pitch script 转为自包含 HTML 幻灯片 | Claude Code session |
 
 **实现说明**：
 - **阶段二**：每张 Idea Card 对应 3 个串行的独立 Claude Code session（产品定义 → 产品设计 → 技术方案），不再使用 sub-agent 模式。Session 间通过文件系统传递文档。
@@ -1107,7 +1127,8 @@ hackathon-agent/
 | Stage 2.5 | 50K-150K | Env Planner × 5-7 |
 | Stage 3 | 3M-8M | 3 sessions × 5-7 projects |
 | Stage 4 | ~0 | 纯 shell 操作，无 AI session |
-| **总计** | **~4.5M-12M** | |
+| Stage 5 | 0.5M-1.5M | 2 sessions × 5-7 projects |
+| **总计** | **~5M-13.5M** | |
 
 以上为粗略估算，实际消耗取决于项目复杂度、循环次数、打回频率等因素。
 
@@ -1212,13 +1233,25 @@ hackathon-agent/
 | `--skip-publish` | 跳过 Stage 4 | 开发测试时不需要发布 |
 | `--private` | 创建私有仓库 | 可选隐私保护 |
 
+### Stage 5 Pitch Deck 决策
+
+| 决策 | 选择 | 理由 |
+|------|------|------|
+| 流水线位置 | Stage 4 之前 | Pitch 产出需复制到 demo/ 目录，随项目一起发布到 GitHub |
+| Agent 架构 | 2-session 串行 (storyteller → deck builder) | 叙事创作与视觉设计是不同技能 |
+| Demo 访问方式 | Symlink demo/ 到 storyteller 工作目录 | Session 可直接读源码，无需复制 |
+| Hook 数据来源 | Storyteller 使用 WebSearch | 真实统计/引用，不是编造的数据 |
+| 幻灯片格式 | 自包含 HTML，无 JS 框架 | 浏览器直接打开，不需要构建步骤 |
+| 幻灯片导航 | CSS-only slides + 键盘事件 | 最小化依赖，投影仪场景可靠 |
+| `--skip-pitch` | 跳过 Stage 5 | 开发测试时不需要 pitch deck |
+| Session 预算 | $3/session | 与 Stage 2 session 复杂度相当 |
+
 ---
 
 ## 16. 待定与后续迭代项
 
 ### 16.1 第一版不做，后续迭代
 
-- Presentation / Pitch Deck 自动生成
 - 智能 token 预算管理
 - 多轮 ConfigGate（Stage 3 开发过程中发现需要新凭证时的处理）
 
@@ -1294,3 +1327,100 @@ Demo project directories (from Stage 3)
 | `publish_started` | 项目开始发布 | `{project_dir, repo_name}` |
 | `publish_completed` | 发布成功 | `{repo_name, repo_url, project_dir}` |
 | `publish_failed` | 发布失败 | `{repo_name, error}` |
+
+---
+
+## 18. Stage 5：Pitch Deck 生成 ✅ 已实现
+
+### 18.1 目标
+
+为每个成功构建的项目自动生成 pitch 演讲脚本和 HTML 幻灯片，将技术产出转化为可以在 hackathon 现场使用的演示材料。
+
+### 18.2 核心特征
+
+- **2-session 串行流水线**：storyteller（叙事脚本）→ deck builder（HTML 幻灯片）
+- 与 Stage 4 **并行执行**：两者都只依赖 Stage 3 输出
+- 不同项目间并行，同一项目 2 个 session 串行
+
+### 18.3 流水线位置
+
+```
+Stage 3 (Demo) → Stage 5 (Pitch Deck) → copy to demo/ → Stage 4 (GitHub Publish)
+```
+
+Stage 5 在 Stage 4 之前执行。Pitch 产出（pitch-script.md + pitch-deck.html）复制到各项目的 demo/ 目录后，Stage 4 的 `git add -A` 会自动将其包含在 GitHub 仓库中。
+
+### 18.4 数据流
+
+```
+Inputs: concept.md + logic.md + technical.md + demo/
+    │
+    ▼
+[Session 1: Storyteller] → pitch-script.md
+    │  读取 PRD 文档 + demo 源码，WebSearch 找 hook
+    │  产出: Hook + Problem + Solution + Our Demo + Closing
+    ▼
+[Session 2: Deck Builder] → pitch-deck.html
+    │  将 pitch script 转为自包含 HTML 幻灯片
+    │  CSS-only slides, 键盘导航, speaker notes
+    ▼
+Output: workspace/stage5/output/{slug}/pitch-script.md + pitch-deck.html
+```
+
+### 18.5 Pitch 结构（4+1 部分）
+
+1. **Hook** — 注意力抓取：惊人统计/问题/场景（Storyteller 使用 WebSearch 找真实数据）
+2. **Problem** — 痛点叙事：用 concept.md 中的人物和场景讲故事
+3. **Solution** — 产品揭示：产品名 + 价值主张 + 3 个核心功能（来自 logic.md）
+4. **Our Demo** — 演示走查：基于实际 demo 源码的具体操作描述
+5. **Closing** — 收尾：影响力声明 + 呼应 hook
+
+### 18.6 Agent 角色
+
+| Session | 角色 | 职责 | 工具 |
+|---------|------|------|------|
+| Session 1 | Storyteller | 阅读 PRD + demo 源码，搜索 hook 数据，撰写演讲脚本 | Read, Write, Glob, Grep, WebSearch, WebFetch |
+| Session 2 | Deck Builder | 将脚本转为视觉 HTML 幻灯片 | Read, Write, Glob, Grep, Bash |
+
+### 18.7 超时与预算
+
+| Session | 超时 | 预算 | 理由 |
+|---------|------|------|------|
+| Storyteller | 600s (10min) | $3 | 需要搜索 + 阅读 + 写作 |
+| Deck Builder | 600s (10min) | $3 | HTML/CSS 生成，复杂度适中 |
+| **单项目总计** | **1200s** | **$6** | |
+
+### 18.8 工作目录结构
+
+```
+workspace/stage5/
+├── {slug}/
+│   ├── storyteller/          # Session 1 工作目录
+│   │   ├── demo -> symlink   # 指向 Stage 3 的 demo/ 目录
+│   │   └── pitch-script.md   # 产出
+│   └── deck/                 # Session 2 工作目录
+│       ├── pitch-script.md   # 从 Session 1 复制
+│       └── pitch-deck.html   # 产出
+└── output/{slug}/            # 最终产出
+    ├── pitch-script.md
+    └── pitch-deck.html
+```
+
+### 18.9 事件
+
+| 事件 | 触发时机 | data 字段 |
+|------|----------|-----------|
+| `pitch_started` | Pitch 生成开始 | `{session_id, slug}` |
+| `pitch_script_completed` | 演讲脚本完成 | `{session_id, slug, script_path}` |
+| `pitch_deck_completed` | 幻灯片完成 | `{session_id, slug, deck_path, script_path}` |
+| `pitch_deck_failed` | Pitch 生成失败 | `{session_id, error}` |
+
+### 18.10 CLI 选项
+
+- `--skip-pitch`：跳过 Stage 5，不生成 pitch deck
+
+### 18.11 失败处理
+
+- Storyteller session 失败 → 不启动 Deck Builder，该项目无 pitch 产出
+- Deck Builder session 失败 → 仍保留 pitch-script.md 到 output（部分产出优于无产出）
+- 单个项目 pitch 失败不影响其他项目

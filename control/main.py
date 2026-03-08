@@ -30,6 +30,7 @@ from control.stages.stage2 import run_stage2
 from control.stages.stage2_5 import run_config_gate
 from control.stages.stage3 import run_stage3
 from control.stages.stage4 import run_stage4
+from control.stages.stage5 import run_stage5, WORKSPACE_DIR as STAGE5_WORKSPACE
 from control.ws_server import WebSocketServer
 
 logging.basicConfig(
@@ -84,6 +85,7 @@ def parse_args() -> argparse.Namespace:
         help="test: repo name prefixed with hg-, README mentions AI. use: clean repo name, no AI attribution.",
     )
     parser.add_argument("--skip-config", action="store_true", help="Skip ConfigGate credential collection (use persistent store only)")
+    parser.add_argument("--skip-pitch", action="store_true", help="Skip Stage 5 (pitch deck generation)")
     parser.add_argument("--no-archive", action="store_true", help="Skip archiving workspace after run")
     return parser.parse_args()
 
@@ -172,19 +174,34 @@ async def async_main() -> None:
                 logger.info("  - %s", d)
             logger.info("=" * 60)
 
-            # Stage 4: Publish to GitHub
-            if project_dirs and not args.skip_publish:
-                logger.info("Starting Stage 4: Publishing %d projects to GitHub", len(project_dirs))
-                repo_urls = await run_stage4(
-                    project_dirs, event_bus, private=args.private,
-                    prd_dirs=[prd_dir] * len(project_dirs),
-                    publish_mode=args.publish_mode,
-                )
-                logger.info("=" * 60)
-                logger.info("Published %d repos:", len(repo_urls))
-                for url in repo_urls:
-                    logger.info("  - %s", url)
-                logger.info("=" * 60)
+            # Stage 5 → copy into demo/ → Stage 4
+            if project_dirs:
+                # Stage 5: Pitch Deck generation
+                if not args.skip_pitch:
+                    pitch_dirs = await run_stage5(
+                        project_dirs, theme=theme, session_mgr=session_mgr,
+                        event_bus=event_bus,
+                        prd_dirs=[prd_dir] * len(project_dirs),
+                    )
+                    copied = _copy_pitch_to_projects(project_dirs)
+                    logger.info("=" * 60)
+                    logger.info("Generated %d pitch decks, copied to %d projects:", len(pitch_dirs), copied)
+                    for d in pitch_dirs:
+                        logger.info("  - %s", d)
+                    logger.info("=" * 60)
+
+                # Stage 4: Publish to GitHub (pitch files already in demo/)
+                if not args.skip_publish:
+                    repo_urls = await run_stage4(
+                        project_dirs, event_bus, private=args.private,
+                        prd_dirs=[prd_dir] * len(project_dirs),
+                        publish_mode=args.publish_mode,
+                    )
+                    logger.info("=" * 60)
+                    logger.info("Published %d repos:", len(repo_urls))
+                    for url in repo_urls:
+                        logger.info("  - %s", url)
+                    logger.info("=" * 60)
             return
 
         # ----------------------------------------------------------
@@ -335,15 +352,32 @@ async def async_main() -> None:
             logger.info("  - %s", d)
         logger.info("=" * 60)
 
-        # Stage 4: Publish to GitHub
-        if project_dirs and not args.skip_publish:
-            logger.info("Starting Stage 4: Publishing %d projects to GitHub", len(project_dirs))
-            repo_urls = await run_stage4(project_dirs, event_bus, private=args.private, publish_mode=args.publish_mode)
-            logger.info("=" * 60)
-            logger.info("Published %d repos:", len(repo_urls))
-            for url in repo_urls:
-                logger.info("  - %s", url)
-            logger.info("=" * 60)
+        # Stage 5 → copy into demo/ → Stage 4
+        if project_dirs:
+            # Stage 5: Pitch Deck generation
+            if not args.skip_pitch:
+                pitch_dirs = await run_stage5(
+                    project_dirs, theme=brief.theme, session_mgr=session_mgr,
+                    event_bus=event_bus,
+                )
+                copied = _copy_pitch_to_projects(project_dirs)
+                logger.info("=" * 60)
+                logger.info("Generated %d pitch decks, copied to %d projects:", len(pitch_dirs), copied)
+                for d in pitch_dirs:
+                    logger.info("  - %s", d)
+                logger.info("=" * 60)
+
+            # Stage 4: Publish to GitHub (pitch files already in demo/)
+            if not args.skip_publish:
+                repo_urls = await run_stage4(
+                    project_dirs, event_bus, private=args.private,
+                    publish_mode=args.publish_mode,
+                )
+                logger.info("=" * 60)
+                logger.info("Published %d repos:", len(repo_urls))
+                for url in repo_urls:
+                    logger.info("  - %s", url)
+                logger.info("=" * 60)
 
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
@@ -359,6 +393,27 @@ async def async_main() -> None:
             # Keep WS alive briefly so dashboard can show final state
             await asyncio.sleep(2)
             await ws_server.stop()
+
+
+def _copy_pitch_to_projects(project_dirs: list[Path]) -> int:
+    """Copy Stage 5 pitch outputs into corresponding project demo/ dirs.
+
+    Returns the number of projects that received pitch files.
+    """
+    copied = 0
+    for project_dir in project_dirs:
+        # Derive slug the same way stage5 does: demo/ -> dev/ -> {slug}/
+        slug = project_dir.parent.parent.name
+        pitch_output = STAGE5_WORKSPACE / "output" / slug
+        if not pitch_output.is_dir():
+            continue
+        for fname in ("pitch-script.md", "pitch-deck.html"):
+            src = pitch_output / fname
+            if src.exists():
+                shutil.copy2(src, project_dir / fname)
+        copied += 1
+        logger.info("Copied pitch files into %s", project_dir)
+    return copied
 
 
 def _archive_workspace() -> Path | None:
