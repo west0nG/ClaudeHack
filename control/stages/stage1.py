@@ -246,7 +246,7 @@ async def run_stage1(
             working_dir=str(WORKSPACE_DIR / f"research-{d.slug}"),
             allowed_tools=["WebSearch", "WebFetch", "Agent", "Read", "Write", "Glob", "Grep"],
             model="sonnet",
-            max_budget_usd=3.0,
+            max_budget_usd=5.0,
             timeout_seconds=900,
         ))
 
