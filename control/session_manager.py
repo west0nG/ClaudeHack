@@ -98,6 +98,9 @@ class SessionManager:
         # Allow launching claude CLI from within a Claude Code session
         env = os.environ.copy()
         env.pop("CLAUDECODE", None)
+        # Merge extra environment variables (e.g. credentials from ConfigGate)
+        if config.extra_env:
+            env.update(config.extra_env)
 
         t0 = time.monotonic()
         try:

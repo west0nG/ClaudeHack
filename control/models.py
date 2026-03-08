@@ -34,6 +34,7 @@ class SessionConfig:
     model: str = "sonnet"
     timeout_seconds: int = 600
     max_retries: int = 1
+    extra_env: dict[str, str] | None = None
 
 
 @dataclass

@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 PROMPTS_DIR = PROJECT_ROOT / "prompts" / "stage3"
 WORKSPACE_DIR = PROJECT_ROOT / "workspace" / "stage3"
+STAGE2_5_DIR = PROJECT_ROOT / "workspace" / "stage2.5"
 
 
 def _read_prompt(name: str) -> str:
@@ -80,12 +81,48 @@ def _check_project_success(work_dir: Path) -> dict:
     return outputs
 
 
+def _load_env_plan(slug: str) -> str:
+    """Load environment-plan.md for a project if it exists.
+
+    Returns the file content, or empty string if not found.
+    """
+    env_plan_path = STAGE2_5_DIR / slug / "environment-plan.md"
+    if env_plan_path.exists():
+        return env_plan_path.read_text(encoding="utf-8")
+    return ""
+
+
+def _load_credentials() -> dict[str, str]:
+    """Load credentials from workspace/stage2.5/credentials.env.
+
+    Returns a dict of env var name → value. Returns empty dict if no file.
+    Parses simple KEY=VALUE format, skipping comments and blank lines.
+    """
+    creds_path = STAGE2_5_DIR / "credentials.env"
+    if not creds_path.exists():
+        return {}
+
+    creds: dict[str, str] = {}
+    for line in creds_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip()
+            if key:
+                creds[key] = value
+    return creds
+
+
 async def _run_project_pipeline(
     prd_dir: Path,
     slug: str,
     theme: str,
     session_mgr: SessionManager,
     event_bus: EventBus,
+    credentials: dict[str, str] | None = None,
 ) -> Path | None:
     """Run the 3-session pipeline for a single project.
 
@@ -95,6 +132,9 @@ async def _run_project_pipeline(
     concept_content = (prd_dir / "concept.md").read_text(encoding="utf-8")
     logic_content = (prd_dir / "logic.md").read_text(encoding="utf-8")
     technical_content = (prd_dir / "technical.md").read_text(encoding="utf-8")
+
+    # Load environment plan (from ConfigGate, may be empty)
+    env_plan_content = _load_env_plan(slug)
 
     # Working directories: plan gets its own, dev and review share one
     project_work_dir = WORKSPACE_DIR / slug
@@ -122,6 +162,7 @@ async def _run_project_pipeline(
         concept_content=concept_content,
         logic_content=logic_content,
         technical_content=technical_content,
+        env_plan_content=env_plan_content,
     )
 
     plan_result = await session_mgr.run_session_bounded(SessionConfig(
@@ -155,7 +196,7 @@ async def _run_project_pipeline(
     dev_plan_content = dev_plan_file.read_text(encoding="utf-8")
 
     # ------------------------------------------------------------------
-    # Session B: Dev
+    # Session B: Dev (with credentials injected as env vars)
     # ------------------------------------------------------------------
     dev_prompt = _render(
         dev_template,
@@ -164,6 +205,7 @@ async def _run_project_pipeline(
         logic_content=logic_content,
         technical_content=technical_content,
         dev_plan_content=dev_plan_content,
+        env_plan_content=env_plan_content,
     )
 
     dev_result = await session_mgr.run_session_bounded(SessionConfig(
@@ -174,6 +216,7 @@ async def _run_project_pipeline(
         model="sonnet",
         timeout_seconds=2400,
         max_budget_usd=8.0,
+        extra_env=credentials or None,
     ))
 
     if dev_result.status != SessionStatus.COMPLETED:
@@ -185,13 +228,14 @@ async def _run_project_pipeline(
         return None
 
     # ------------------------------------------------------------------
-    # Session C: Review (shares working directory with dev)
+    # Session C: Review (shares working directory with dev, credentials injected)
     # ------------------------------------------------------------------
     review_prompt = _render(
         review_template,
         theme=theme,
         concept_content=concept_content,
         dev_plan_content=dev_plan_content,
+        env_plan_content=env_plan_content,
     )
 
     review_result = await session_mgr.run_session_bounded(SessionConfig(
@@ -202,6 +246,7 @@ async def _run_project_pipeline(
         model="sonnet",
         timeout_seconds=1200,
         max_budget_usd=5.0,
+        extra_env=credentials or None,
     ))
 
     if review_result.status != SessionStatus.COMPLETED:
@@ -239,6 +284,7 @@ async def _run_project_pipeline(
             model="sonnet",
             timeout_seconds=2400,
             max_budget_usd=8.0,
+            extra_env=credentials or None,
         ))
 
         if bounce_dev_result.status == SessionStatus.COMPLETED:
@@ -251,6 +297,7 @@ async def _run_project_pipeline(
                 model="sonnet",
                 timeout_seconds=1200,
                 max_budget_usd=5.0,
+                extra_env=credentials or None,
             ))
 
             if bounce_review_result.status != SessionStatus.COMPLETED:
@@ -318,11 +365,21 @@ async def run_stage3(
 
     WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
 
+    # Load credentials from ConfigGate (shared across all projects)
+    credentials = _load_credentials()
+    if credentials:
+        logger.info("Stage 3: Loaded %d credentials from ConfigGate", len(credentials))
+    else:
+        logger.info("Stage 3: No credentials found (ConfigGate skipped or no credentials.env)")
+
     # Launch project pipelines in parallel (SessionManager semaphore bounds concurrency)
     tasks = []
     for prd_dir in prd_dirs:
         slug = _slugify_prd_dir(prd_dir)
-        tasks.append(_run_project_pipeline(prd_dir, slug, theme, session_mgr, event_bus))
+        tasks.append(_run_project_pipeline(
+            prd_dir, slug, theme, session_mgr, event_bus,
+            credentials=credentials if credentials else None,
+        ))
 
     logger.info("Stage 3: Launching %d project pipelines (3 sessions each)", len(tasks))
     results = await asyncio.gather(*tasks)

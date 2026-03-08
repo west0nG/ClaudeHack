@@ -26,8 +26,9 @@ from control.review_gate import ReviewGate
 from control.session_manager import PROJECT_ROOT, SessionManager
 from control.stages.stage0 import run_stage0
 from control.stages.stage1 import run_stage1
-from control.stages.stage2 import _run_card_pipeline, _slugify, run_stage2
-from control.stages.stage3 import _run_project_pipeline, _slugify_prd_dir, run_stage3
+from control.stages.stage2 import run_stage2
+from control.stages.stage2_5 import run_config_gate
+from control.stages.stage3 import run_stage3
 from control.stages.stage4 import run_stage4
 from control.ws_server import WebSocketServer
 
@@ -82,33 +83,9 @@ def parse_args() -> argparse.Namespace:
         default="test",
         help="test: repo name prefixed with hg-, README mentions AI. use: clean repo name, no AI attribution.",
     )
+    parser.add_argument("--skip-config", action="store_true", help="Skip ConfigGate credential collection (use persistent store only)")
     parser.add_argument("--no-archive", action="store_true", help="Skip archiving workspace after run")
     return parser.parse_args()
-
-
-async def _run_card_end_to_end(
-    card_path: Path,
-    theme: str,
-    session_mgr: SessionManager,
-    event_bus: EventBus,
-) -> Path | None:
-    """Run a single card through Stage 2 (PRD) then Stage 3 (Demo).
-
-    Returns the demo project directory on success, or None if eliminated/failed.
-    """
-    slug = _slugify(card_path)
-
-    # Stage 2: card -> PRD directory
-    prd_dir = await _run_card_pipeline(card_path, slug, theme, session_mgr, event_bus)
-    if prd_dir is None:
-        return None  # eliminated or failed
-
-    # Stage 3: PRD directory -> project directory
-    project_slug = _slugify_prd_dir(prd_dir)
-    project_dir = await _run_project_pipeline(
-        prd_dir, project_slug, theme, session_mgr, event_bus
-    )
-    return project_dir
 
 
 async def async_main() -> None:
@@ -165,8 +142,20 @@ async def async_main() -> None:
             theme = _extract_theme_from_concept(prd_dir / "concept.md")
             logger.info("Running Stage 3 directly on: %s (theme: %s)", prd_dir.name, theme)
 
-            project_dirs = await run_stage3(
+            # ConfigGate: collect credentials before Stage 3
+            approved_dirs, _ = await run_config_gate(
                 prd_dirs=[prd_dir],
+                event_bus=event_bus,
+                skip=args.skip_config,
+                no_dashboard=args.no_dashboard,
+            )
+
+            if not approved_dirs:
+                logger.error("ConfigGate blocked all projects — cannot proceed")
+                sys.exit(1)
+
+            project_dirs = await run_stage3(
+                prd_dirs=approved_dirs,
                 theme=theme,
                 session_mgr=session_mgr,
                 event_bus=event_bus,
@@ -266,9 +255,9 @@ async def async_main() -> None:
         logger.info("Stage 1 produced %d Idea Cards", len(idea_cards))
 
         # ----------------------------------------------------------
-        # Streaming Pipeline: ReviewGate → Stage 2 → Stage 3
-        # Cards flow individually: approved cards immediately start
-        # Stage 2, and Stage 2 outputs immediately start Stage 3.
+        # Phased Pipeline: ReviewGate → Stage 2 → ConfigGate → Stage 3
+        # Stage 2 runs all cards in parallel, then ConfigGate collects
+        # credentials once, then Stage 3 runs approved projects in parallel.
         # ----------------------------------------------------------
 
         # In single mode, limit to 1 card
@@ -281,68 +270,60 @@ async def async_main() -> None:
             logger.info("=" * 60)
             return
 
-        # In streaming mode, stages 2 and 3 overlap per card.
-        # Emit stage_started for stage 2 so dashboard shows progress.
-        await event_bus.emit(Event(
-            type="stage_started",
-            data={"stage": 2, "theme": brief.theme, "cards": len(idea_cards)},
-        ))
-
-        card_tasks: list[asyncio.Task[Path | None]] = []
-
+        # ReviewGate: filter cards
+        approved_cards: list[Path] = []
         if args.skip_review:
-            # No review — launch all cards immediately
-            logger.info("Launching streaming pipeline for %d cards (review skipped)", len(idea_cards))
-            for card in idea_cards:
-                task = asyncio.create_task(
-                    _run_card_end_to_end(card, brief.theme, session_mgr, event_bus)
-                )
-                card_tasks.append(task)
+            approved_cards = list(idea_cards)
+            logger.info("Review skipped, proceeding with %d cards", len(approved_cards))
         else:
-            # Streaming review: yield one card at a time, launch each immediately
-            logger.info("Starting streaming review for %d cards", len(idea_cards))
+            logger.info("Starting review for %d cards", len(idea_cards))
             review_gate = ReviewGate(event_bus, ws_server=ws_server)
             async for card in review_gate.stream_approved_cards(idea_cards):
-                logger.info("Card approved, launching pipeline: %s", card.name)
-                task = asyncio.create_task(
-                    _run_card_end_to_end(card, brief.theme, session_mgr, event_bus)
-                )
-                card_tasks.append(task)
+                logger.info("Card approved: %s", card.name)
+                approved_cards.append(card)
 
-        if not card_tasks:
+        if not approved_cards:
             logger.info("No cards approved — pipeline ending after review")
             logger.info("=" * 60)
             return
 
-        # Wait for all card pipelines to complete
-        results = await asyncio.gather(*card_tasks, return_exceptions=True)
+        # Stage 2: PRD generation (parallel across cards)
+        prd_dirs = await run_stage2(
+            idea_cards=approved_cards,
+            theme=brief.theme,
+            session_mgr=session_mgr,
+            event_bus=event_bus,
+        )
 
-        # Collect successful project directories
-        project_dirs: list[Path] = []
-        failed_count = 0
-        for r in results:
-            if isinstance(r, BaseException):
-                logger.error("Card pipeline raised exception: %s", r, exc_info=r)
-                failed_count += 1
-            elif isinstance(r, Path):
-                project_dirs.append(r)
-            else:
-                # None: card was eliminated or pipeline failed (already logged internally)
-                failed_count += 1
+        if not prd_dirs:
+            logger.info("No PRDs produced — pipeline ending after Stage 2")
+            logger.info("=" * 60)
+            return
 
-        # Emit stage_completed for stage 3 (the final stage in the pipeline)
-        await event_bus.emit(Event(
-            type="stage_completed",
-            data={
-                "stage": 3,
-                "projects": len(project_dirs),
-                "failed": failed_count,
-            },
-        ))
+        logger.info("Stage 2 produced %d PRD directories", len(prd_dirs))
+
+        # Stage 2.5: ConfigGate — collect credentials, generate env plans
+        approved_dirs, _ = await run_config_gate(
+            prd_dirs=prd_dirs,
+            event_bus=event_bus,
+            skip=args.skip_config,
+            no_dashboard=args.no_dashboard,
+        )
+
+        if not approved_dirs:
+            logger.info("ConfigGate blocked all projects — pipeline ending")
+            logger.info("=" * 60)
+            return
+
+        # Stage 3: Demo development (parallel across projects)
+        project_dirs = await run_stage3(
+            prd_dirs=approved_dirs,
+            theme=brief.theme,
+            session_mgr=session_mgr,
+            event_bus=event_bus,
+        )
 
         logger.info("=" * 60)
-        if failed_count:
-            logger.info("%d cards produced no project (eliminated or failed)", failed_count)
         logger.info("Pipeline complete! %d projects built:", len(project_dirs))
         for d in project_dirs:
             logger.info("  - %s", d)

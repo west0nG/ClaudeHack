@@ -3,6 +3,7 @@ archive/
 __pycache__/
 *.pyc
 .env
+credentials.env
 *.egg-info/
 dist/
 build/
