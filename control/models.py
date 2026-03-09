@@ -108,6 +108,22 @@ class HackathonBrief:
             target_audience=data.get("target_audience"),
         )
 
+    def to_dict(self) -> dict:
+        """Serialize to dict for JSON persistence."""
+        return {
+            "theme": self.theme,
+            "theme_description": self.theme_description,
+            "constraints": self.constraints,
+            "evaluation_criteria": self.evaluation_criteria,
+            "restrictions": self.restrictions,
+            "special_requirements": self.special_requirements,
+            "suggested_directions": self.suggested_directions,
+            "raw_prompt": self.raw_prompt,
+            "time_limit": self.time_limit,
+            "team_size": self.team_size,
+            "target_audience": self.target_audience,
+        }
+
     def render_context_block(self) -> str:
         """Render constraints/criteria/restrictions as a text block for prompts."""
         lines: list[str] = []

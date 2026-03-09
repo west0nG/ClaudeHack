@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import sys
 from datetime import datetime
@@ -56,6 +57,13 @@ def parse_args() -> argparse.Namespace:
     input_group.add_argument(
         "--prd-dir",
         help="Path to a PRD directory (containing concept.md, logic.md, technical.md) — skip Stages 0-2, run Stage 3 directly",
+    )
+    input_group.add_argument(
+        "--resume",
+        nargs="?",
+        const="latest",
+        metavar="ARCHIVE_DIR",
+        help="Resume from an archived run. Use 'latest' (default) or a path like archive/20260308-144533/",
     )
 
     parser.add_argument("--interests", default=None, help="Comma-separated interest hints (optional)")
@@ -120,7 +128,7 @@ async def async_main() -> None:
     # Archive stale workspace from previous run (if any)
     # This handles the case where a previous run was killed before reaching finally.
     workspace_dir = PROJECT_ROOT / "workspace"
-    if workspace_dir.exists() and any(workspace_dir.iterdir()):
+    if not args.resume and workspace_dir.exists() and any(workspace_dir.iterdir()):
         if args.clean:
             logger.info("Cleaning workspace: %s", workspace_dir)
             shutil.rmtree(workspace_dir)
@@ -129,6 +137,137 @@ async def async_main() -> None:
             _archive_workspace()
 
     try:
+        # ----------------------------------------------------------
+        # Resume mode: restore archive and continue from last checkpoint
+        # ----------------------------------------------------------
+        if args.resume:
+            archive_path = _resolve_archive(args.resume)
+            logger.info("Resuming from archive: %s", archive_path)
+
+            # Restore workspace (copy, not move — keep archive intact)
+            if workspace_dir.exists():
+                shutil.rmtree(workspace_dir)
+            shutil.copytree(str(archive_path), str(workspace_dir))
+            logger.info("Restored workspace from archive")
+
+            # Load run metadata
+            metadata = _load_run_metadata(workspace_dir)
+            if metadata:
+                brief = HackathonBrief.from_dict(metadata["brief"])
+                theme = metadata["theme"]
+            else:
+                # Retroactive: no metadata, infer theme
+                theme = _extract_theme_from_concept(
+                    next((workspace_dir / "stage2" / "output").glob("*/concept.md"), None)
+                ) if (workspace_dir / "stage2" / "output").is_dir() else "General"
+                brief = HackathonBrief.from_theme(theme)
+                logger.warning("No run-metadata.json found, inferred theme: %s", theme)
+
+            last_completed = _detect_last_completed_stage(workspace_dir)
+            stage_names = {-1: "none", 0: "Stage 0", 1: "Stage 1", 2: "Stage 2",
+                           25: "Stage 2.5", 3: "Stage 3", 5: "Stage 5"}
+            logger.info("Last completed stage: %s", stage_names.get(last_completed, str(last_completed)))
+
+            # Collect outputs from completed stages
+            idea_cards: list[Path] = []
+            prd_dirs: list[Path] = []
+            project_dirs: list[Path] = []
+
+            if last_completed >= 1:
+                idea_cards = sorted((workspace_dir / "stage1" / "output").glob("idea-card-*.md"))
+                logger.info("Recovered %d idea cards from Stage 1", len(idea_cards))
+            if last_completed >= 2:
+                prd_dirs = sorted([
+                    d for d in (workspace_dir / "stage2" / "output").iterdir()
+                    if d.is_dir() and (d / "concept.md").exists()
+                ])
+                logger.info("Recovered %d PRD dirs from Stage 2", len(prd_dirs))
+            if last_completed >= 3:
+                project_dirs = _collect_successful_projects(workspace_dir / "stage3")
+                logger.info("Recovered %d project dirs from Stage 3", len(project_dirs))
+
+            # Determine next stage to run
+            next_stage_map = {-1: 0, 0: 1, 1: 2, 2: 25, 25: 3, 3: 5, 5: 4}
+            next_stage = next_stage_map.get(last_completed, 99)
+            logger.info("Resuming from: %s", stage_names.get(next_stage, f"Stage {next_stage}"))
+
+            # Run remaining stages
+            if next_stage <= 1:
+                idea_cards = await run_stage1(
+                    theme=theme, session_mgr=session_mgr, event_bus=event_bus,
+                    interests=metadata.get("interests") if metadata else None,
+                    max_directions=max_directions, brief=brief,
+                )
+
+            if next_stage <= 1:
+                # ReviewGate (only if Stage 1 just ran)
+                approved_cards: list[Path] = []
+                if args.skip_review:
+                    approved_cards = list(idea_cards)
+                else:
+                    review_gate = ReviewGate(event_bus, ws_server=ws_server)
+                    async for card in review_gate.stream_approved_cards(idea_cards):
+                        approved_cards.append(card)
+                idea_cards = approved_cards
+
+            if not idea_cards and next_stage <= 1:
+                logger.info("No cards approved — pipeline ending")
+                return
+
+            if next_stage <= 2:
+                prd_dirs = await run_stage2(
+                    idea_cards=idea_cards, theme=theme,
+                    session_mgr=session_mgr, event_bus=event_bus,
+                )
+
+            if not prd_dirs and next_stage <= 2:
+                logger.info("No PRDs produced — pipeline ending")
+                return
+
+            if next_stage <= 25:
+                approved_dirs, _ = await run_config_gate(
+                    prd_dirs=prd_dirs, event_bus=event_bus,
+                    skip=args.skip_config, no_dashboard=args.no_dashboard,
+                    ws_server=ws_server,
+                )
+            else:
+                approved_dirs = prd_dirs
+
+            if not approved_dirs and next_stage <= 25:
+                logger.info("ConfigGate blocked all projects — pipeline ending")
+                return
+
+            if next_stage <= 3:
+                project_dirs = await run_stage3(
+                    prd_dirs=approved_dirs, theme=theme,
+                    session_mgr=session_mgr, event_bus=event_bus,
+                )
+
+            if project_dirs:
+                if not args.skip_pitch and next_stage <= 5:
+                    pitch_dirs = await run_stage5(
+                        project_dirs, theme=theme, session_mgr=session_mgr,
+                        event_bus=event_bus,
+                    )
+                    copied = _copy_pitch_to_projects(project_dirs)
+                    logger.info("Generated %d pitch decks, copied to %d projects", len(pitch_dirs), copied)
+
+                if not args.skip_publish:
+                    repo_urls = await run_stage4(
+                        project_dirs, event_bus, private=args.private,
+                        publish_mode=args.publish_mode,
+                    )
+                    logger.info("=" * 60)
+                    logger.info("Published %d repos:", len(repo_urls))
+                    for url in repo_urls:
+                        logger.info("  - %s", url)
+                    logger.info("=" * 60)
+
+            logger.info("=" * 60)
+            logger.info("Resume pipeline complete! %d projects", len(project_dirs))
+            logger.info("=" * 60)
+            return
+
         # ----------------------------------------------------------
         # Direct PRD directory mode: skip Stages 0-2, run Stage 3 only
         # ----------------------------------------------------------
@@ -254,6 +393,9 @@ async def async_main() -> None:
             logger.info("Running Stage 0: Interpreting hackathon prompt (%d chars)", len(raw_prompt))
             brief = await run_stage0(raw_prompt, session_mgr, event_bus)
             logger.info("Interpreted theme: %s", brief.theme)
+
+        # Save run metadata for resume support
+        _save_run_metadata(brief, args)
 
         # ----------------------------------------------------------
         # Stage 1: Idea Discovery
@@ -393,6 +535,110 @@ async def async_main() -> None:
             # Keep WS alive briefly so dashboard can show final state
             await asyncio.sleep(2)
             await ws_server.stop()
+
+
+def _resolve_archive(resume_arg: str) -> Path:
+    """Resolve 'latest' or a specific archive path."""
+    if resume_arg == "latest":
+        archive_dir = PROJECT_ROOT / "archive"
+        if not archive_dir.exists():
+            raise FileNotFoundError("No archive/ directory found")
+        subdirs = sorted([d for d in archive_dir.iterdir() if d.is_dir()])
+        if not subdirs:
+            raise FileNotFoundError("No archived runs found in archive/")
+        return subdirs[-1]
+
+    path = Path(resume_arg)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    if not path.is_dir():
+        raise FileNotFoundError(f"Archive directory not found: {path}")
+    return path
+
+
+def _save_run_metadata(brief: HackathonBrief, args: argparse.Namespace) -> None:
+    """Save run metadata for resume support."""
+    workspace_dir = PROJECT_ROOT / "workspace"
+    workspace_dir.mkdir(parents=True, exist_ok=True)
+    data = {
+        "theme": brief.theme,
+        "brief": brief.to_dict(),
+        "interests": args.interests,
+        "mode": args.mode,
+        "started_at": datetime.now().isoformat(),
+    }
+    (workspace_dir / "run-metadata.json").write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def _load_run_metadata(workspace: Path) -> dict | None:
+    """Load run-metadata.json from workspace, or None if missing."""
+    meta_path = workspace / "run-metadata.json"
+    if not meta_path.exists():
+        return None
+    return json.loads(meta_path.read_text(encoding="utf-8"))
+
+
+def _detect_last_completed_stage(workspace: Path) -> int:
+    """Returns the number of the last COMPLETED stage, or -1 if none.
+
+    Uses 25 to represent Stage 2.5. The resume point is the stage AFTER this.
+    """
+    # Check in reverse order (most advanced first)
+
+    # Stage 5 completed? (pitch decks exist in output/)
+    stage5_output = workspace / "stage5" / "output"
+    if stage5_output.is_dir() and any(stage5_output.iterdir()):
+        return 5
+
+    # Stage 3 completed? (at least one demo/package.json)
+    stage3 = workspace / "stage3"
+    if stage3.is_dir():
+        for slug_dir in stage3.iterdir():
+            if not slug_dir.is_dir():
+                continue
+            demo_pkg = slug_dir / "dev" / "demo" / "package.json"
+            if demo_pkg.exists():
+                return 3
+
+    # Stage 2.5 completed? (credentials.env in stage2.5/)
+    stage2_5 = workspace / "stage2.5"
+    if stage2_5.is_dir() and (stage2_5 / "credentials.env").exists():
+        return 25
+
+    # Stage 2 completed? (output dir with at least one PRD set)
+    stage2_output = workspace / "stage2" / "output"
+    if stage2_output.is_dir():
+        for d in stage2_output.iterdir():
+            if d.is_dir() and (d / "concept.md").exists():
+                return 2
+
+    # Stage 1 completed? (output dir with idea cards)
+    stage1_output = workspace / "stage1" / "output"
+    if stage1_output.is_dir() and list(stage1_output.glob("idea-card-*.md")):
+        return 1
+
+    # Stage 0 completed? (interpreter dir exists with content)
+    stage0 = workspace / "stage0" / "interpreter"
+    if stage0.is_dir() and any(stage0.iterdir()):
+        return 0
+
+    return -1
+
+
+def _collect_successful_projects(stage3_dir: Path) -> list[Path]:
+    """Collect demo/ dirs from Stage 3 that have package.json (success marker)."""
+    projects = []
+    if not stage3_dir.is_dir():
+        return projects
+    for slug_dir in sorted(stage3_dir.iterdir()):
+        if not slug_dir.is_dir():
+            continue
+        demo_dir = slug_dir / "dev" / "demo"
+        if (demo_dir / "package.json").exists():
+            projects.append(demo_dir)
+    return projects
 
 
 def _copy_pitch_to_projects(project_dirs: list[Path]) -> int:

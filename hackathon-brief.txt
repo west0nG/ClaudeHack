@@ -1,8 +1,4 @@
-What to Build
-Anything that removes friction from the software development lifecycle. Automate security fixes. Streamline code reviews. Generate compliance reports. Flag risks before they become problems.
+What to build
 
-The best submissions will tell a story: here's the pain, here's how the agent solves it, here's what changes for developers.
+AI native product - interesting, easy to understand, solve actual pain points for people like us, for public. Be interesting, creative, and big
 
-Chat alone won't qualify. We want to see agents that react to triggers and take action.
-
-At least one custom public agent or public flow should be created. See the resources tab to learn how to create custom agents & flows, and get inspired in what is possible to build.
