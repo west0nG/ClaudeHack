@@ -57,3 +57,5 @@ Output ONLY a valid JSON object. No markdown fences, no explanation, no preamble
 3. **Constraints vs. restrictions** — Constraints are things you MUST do; restrictions are things you MUST NOT do.
 4. **Evaluation criteria** — Include weights/percentages if specified. If no weights, just list the criteria.
 5. **Theme** — Distill to the shortest accurate description. "Build innovative solutions using generative AI to improve education outcomes" → theme: "Generative AI for Education".
+6. **Contradiction handling** — If the prompt contains contradictory statements (e.g., "no blockchain" AND "explore Web3"), include both in the relevant fields and add a top-level `"conflicts"` array listing the contradictions (e.g., `["Restriction 'no blockchain' conflicts with suggested direction 'explore Web3'"]`). If no contradictions, omit the field or use `[]`.
+7. **Malformed input fallback** — If the prompt is too vague to extract structured data (e.g., just a single sentence with no constraints), output a minimal JSON with only `theme` filled and all other fields as empty arrays or `null`.

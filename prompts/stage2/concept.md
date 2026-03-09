@@ -58,7 +58,13 @@ For the chosen product_type, define:
 - **Deployment method**: How does a user install/access this product?
 - **Carrier dependencies**: What credentials/permissions are required for this product to exist at all? (not for optional features — for the product itself)
 
-**Important**: Don't default to `web_app` out of habit. A code review tool is more naturally a `vscode_extension` or `github_app`. A team notification system is more naturally a `slack_app`. Choose the type that best fits the pain point.
+**Important**: Don't default to `web_app` out of habit. Use this decision tree:
+1. If the product needs to live inside a platform (Slack, VS Code, browser, GitHub) → choose the platform-specific type
+2. If it needs a backend API but no user-facing UI → `api_service`
+3. If it's a developer/power-user tool run from terminal → `cli_tool`
+4. Default to `web_app` ONLY if no other type fits better
+
+A code review tool is more naturally a `vscode_extension` or `github_app`. A team notification system is more naturally a `slack_app`.
 
 **Anti-pattern: Avoid defaulting to `web_app` with no external APIs.** A web_app that only uses localStorage and browser APIs is rarely solving a real pain point. Most real solutions need at least one of:
 - An AI/LLM API for intelligent processing (OpenAI, Claude, etc.)
@@ -75,7 +81,7 @@ Write a clear product concept with these elements:
 - **One-Sentence Definition**: "[Name] is a [product_type] that helps [target user] [solve specific pain] by [key mechanism]."
 - **Target User**: Who specifically uses this? Be precise (not "everyone" or "students" — more like "graduate students preparing for qualifying exams")
 - **Core Value Proposition**: The single most important benefit. What changes for the user?
-- **What This Is NOT** (boundaries): 2-3 things this product explicitly does NOT do. This prevents scope creep and clarifies focus.
+- **What This Is NOT** (boundaries): 2-3 things this product explicitly does NOT do. Each boundary must be falsifiable — bad: "Not a general-purpose tool". Good: "Not for teams >10 people — designed for solo users and pairs only". This prevents scope creep and clarifies focus.
 - **Key Assumptions**: 2-3 assumptions that must be true for this product to work. These are risks.
 
 ### Step 5: Self-Review
@@ -161,12 +167,23 @@ Write `concept.md` to the current working directory with this structure:
 [What specific evidence (or lack thereof) led to elimination]
 ```
 
+**Example of a valid elimination**:
+```markdown
+# ELIMINATED: Smart Parking Finder
+
+## Reason
+Pain point failed frequency validation. Evidence shows this is a situational annoyance (weekend shopping trips) not a daily/weekly pain. Current workaround (circling for 2-3 minutes) is not painful enough to drive adoption.
+
+## Evidence
+Only 1 real URL found (Reddit post with 3 upvotes). No data on frequency. Existing apps (SpotHero, ParkWhiz) already partially address this.
+```
+
 ---
 
 ## Critical Rules
 
 1. **Be honest about evidence quality** — do not rubber-stamp weak evidence. If the pain isn't real, eliminate early to save resources.
-2. **Stay grounded** — every claim in your concept must trace back to evidence in the Idea Card. No inventing needs.
+2. **Stay grounded with evidence traceability** — every claim about the target user's pain must cite a specific source from the Idea Card (e.g., "Per Reddit evidence: users spend 20+ min cross-referencing ingredients"). No inventing needs.
 3. **Boundaries matter** — clearly stating what the product is NOT is as important as what it IS.
 4. **One product, one pain** — do not try to solve multiple unrelated pains. Pick the strongest one.
 5. **Hackathon scope** — the concept must be demonstrable in a prototype. No concepts that require months of data collection or partnership agreements.

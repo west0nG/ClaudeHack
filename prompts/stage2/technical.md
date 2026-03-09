@@ -277,9 +277,11 @@ Write `technical.md` to the current working directory with this structure:
 
 1. **Tech stack must match product_type** — Bolt.js for Slack apps, VS Code Extension API for extensions, MV3 for Chrome extensions. Only use React + Vite for web_app.
 2. **Be specific about file paths** — don't say "create files as needed." List every file.
-3. **Prerequisites Checklist must be complete** — every external credential, API key, and platform requirement must be listed. This checklist drives the ConfigGate stage.
-4. **Carrier vs. functional dependencies matter** — be precise about which dependencies are absolutely required (carrier) vs. which are for optional features (functional). Getting this wrong wastes resources or blocks viable projects.
+3. **Prerequisites Checklist must be complete** — every external credential, API key, and platform requirement must be listed. This checklist drives the ConfigGate stage. "External" means anything requiring an API key, account, or network access. npm packages are NOT external dependencies.
+4. **Carrier vs. functional dependencies matter** — be precise about which dependencies are absolutely required (carrier) vs. which are for optional features (functional). Getting this wrong wastes resources or blocks viable projects. Carrier = "REQUIRED — without this, the app cannot start". Functional = "OPTIONAL — feature X degrades gracefully without this".
 5. **Plan for real APIs, not mocks** — when a module calls an external API, plan for the real SDK and real credentials (read from environment variables). The ConfigGate stage will handle collecting credentials.
-6. **Environment variables for all secrets** — never hardcode API keys or tokens. Always read from `process.env.XXX` (Node.js) or `os.environ["XXX"]` (Python). The `.env.example` file lists all required variables without values.
-7. **Hackathon scope** — don't architect for scalability, testing, or production. Architect for "builds and runs correctly in a real environment."
-8. **Deployment instructions must be real** — a user following your instructions should be able to get the product running. No handwaving.
+6. **Environment variables for all secrets** — use `SCREAMING_SNAKE_CASE` for all env var names. Never hardcode API keys or tokens. Always read from `process.env.XXX` (Node.js) or `os.environ["XXX"]` (Python). The `.env.example` file lists all required variables without values, with a one-line comment per variable explaining where to get it.
+7. **Pin dependency versions** — pin major.minor versions for all dependencies (e.g., `@slack/bolt@^3.12`). Do not use `latest` or unversioned.
+8. **Hackathon scope** — don't architect for scalability, testing, or production. Architect for "builds and runs correctly in a real environment."
+9. **Deployment instructions must be real** — a user following your instructions should be able to get the product running. No handwaving.
+10. **Hybrid product types** — if a product combines types (e.g., CLI with embedded web UI), choose the PRIMARY interaction mode as the product_type and note the secondary mode in the architecture section.

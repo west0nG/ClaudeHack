@@ -31,7 +31,13 @@ The product concept defines a `product_type`. Your verification must check that 
 
 **Credentials are available as environment variables.** Use them for real environment verification where applicable.
 
-**There should be no mocks in this project.** If you find mock implementations, flag them as issues. Modules marked ⏭️ (not implemented) should have interface stubs with TODO comments — not mock data or simulated responses.
+**There should be no mocks in this project.** Use these definitions:
+
+- **Mock** (NOT allowed at runtime): Hardcoded fake data returned by functions (e.g., `return [{name: "John", age: 30}]`), simulated API responses, placeholder images/text pretending to be real data.
+- **Stub** (allowed for ⏭️ modules only): Function/class signature with a `TODO` comment, throws "not implemented" error or returns empty/default value with comment explaining why.
+- **Test mock** (allowed in test files only): jest.mock(), sinon stubs — these are fine.
+
+If you find mock implementations (per the definition above), flag them as issues.
 
 ---
 
@@ -239,13 +245,33 @@ After fixes are applied, re-run the Reviewer Agent (Step 1) once more. **Maximum
 
 ---
 
+## Success Criteria by Product Type
+
+| product_type | Verification | Success condition |
+|---|---|---|
+| `web_app` | `npm run build` | Exits 0, no TypeScript/compilation errors |
+| `slack_app` | `npm run build` (if TS) + `node -e "require('./src/app.js')"` | No import/syntax errors, manifest.json is valid JSON |
+| `cli_tool` | `node bin/cli.js --help` | Prints help text without errors |
+| `chrome_extension` | `npm run build` (if build step) | dist/ exists with manifest.json |
+| `vscode_extension` | `npm run compile` + `vsce package` | .vsix file generated |
+| `api_service` | `timeout 5 node src/server.js` | Starts without crash for 3+ seconds, then kill |
+
+## Partial Success Handling
+
+- If **1-2 code units** have bugs but others work: verdict is ISSUES_FOUND (severity: moderate). A mostly-working project is still valuable.
+- If **>2 code units** fail: verdict is ISSUES_FOUND (severity: high).
+- Only write BUILD_FAILED.md if the project cannot build/start at all after all fix cycles.
+
+---
+
 ## Critical Rules
 
 1. **Follow the sequence**: Reviewer → Designer (conditional) → Fix → Final. Do not skip or reorder.
-2. **Use the correct verification command for the product_type** — not everything is `npm run build`. Do NOT use `npm run dev`.
+2. **Use the correct verification command for the product_type** — see Success Criteria table above. Do NOT use `npm run dev`.
 3. **Designer step is conditional** — skip for CLI tools, API services, and Slack apps (Block Kit is JSON, not CSS).
-4. **No mocks allowed** — if you find mock implementations, they are bugs. Replace with real API calls or clean stubs.
-5. **Hardcoded credentials are blocking** — any API key, token, or secret in source code must be moved to environment variable reads.
-6. **Fix cycles are limited** — maximum 2 cycles of fix + re-review. After that, ship what works.
-7. **BUILD_FAILED.md is the failure sentinel** — write it in the WORKING DIRECTORY (not inside demo/) if the final verification fails.
-8. **README.md must have real run instructions** — not just `npm run dev`. Include credential setup, platform connection, and verification steps.
+4. **Designer scope**: Allowed changes: colors, spacing, fonts, animations, ARIA labels, contrast fixes, hover states, loading indicators for existing elements. NOT allowed: new routes/pages, new buttons/controls, changed layout structure, new API calls.
+5. **No mocks allowed** — if you find mock implementations (hardcoded fake data, simulated API responses), they are bugs. Replace with real API calls or clean stubs (function signature + TODO).
+6. **Hardcoded credentials are blocking** — any API key, token, or secret in source code must be moved to environment variable reads.
+7. **Fix cycles are limited** — maximum 2 cycles of fix + re-review. After that, ship what works.
+8. **BUILD_FAILED.md is the failure sentinel** — write it in the WORKING DIRECTORY (the session's working directory, which is the parent of `demo/`) if the final verification fails. Never write it inside `demo/`.
+9. **README.md must have real run instructions** — not just `npm run dev`. Include credential setup, platform connection, and verification steps.

@@ -214,7 +214,9 @@ Write `dev-plan.md` to the current working directory with this structure:
 2. **Every code unit must map to at least one functional module** — orphan units that don't implement any module are wasted effort.
 3. **Use correct terminology for the product_type** — "command handler" not "page" for Slack apps; "provider" not "component" for VS Code extensions.
 4. **Shared layer must be self-contained** — after building the shared layer, any module should be buildable without waiting for other modules.
-5. **Waves should be minimal** — ideally everything is Wave 1. Only create Wave 2 if there's a genuine data dependency between code units.
+5. **Waves should be minimal** — ideally everything is Wave 1. Only create Wave 2 if a code unit needs to import and call a function whose **implementation** (not just interface) must exist from another unit. If it only needs the interface/type, it belongs in Wave 1.
 6. **Respect the technical plan** — use the tech stack and architecture from the technical plan. Don't redesign.
 7. **Skip modules, don't mock** — modules with ⏭️ status get an interface stub + TODO, nothing more.
 8. **Plan for real credentials** — API clients read from environment variables. Never plan to hardcode secrets or use mock API responses.
+9. **Scaffold validation** — After scaffolding, the verification command must pass. If it doesn't, fix the scaffold before proceeding to Shared Layer.
+10. **Shared layer reuse check** — Every code unit should import at least 1 item from the shared layer (API client, utility, type, or component). If a code unit doesn't use the shared layer, reconsider whether it duplicates shared functionality.

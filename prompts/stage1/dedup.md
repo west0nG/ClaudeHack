@@ -18,6 +18,8 @@ Use the `Glob` tool to list all `*.md` files in `input/`. Read every file.
 
 Two cards are duplicates if they address **essentially the same pain point for essentially the same persona**, even if titled differently.
 
+**Similarity threshold**: Two cards are duplicates if they share >70% overlap in: target persona keywords + core pain point description + top solution direction. If overlap is 50-70%, they are partial duplicates — merge with a note explaining the split. If overlap is <50%, they are distinct cards — keep both.
+
 **Duplicate merge rules**:
 - If one card has stronger evidence (more real URLs, more specific quotes), keep that one
 - If both cards have strong evidence on the same pain point, merge the best parts:
@@ -34,7 +36,7 @@ Evaluate every card (including merged ones) against this elimination table. A ca
 | Criterion | Pass | Borderline (keep with note) | Eliminate |
 |-----------|------|----------------------------|-----------|
 | **Evidence Count** | 3+ real URLs | 2 real URLs | 0-1 real URLs |
-| **Evidence Quality** | Specific quotes, recent (2024-2025), real platforms | URLs present but vague descriptions | No URLs, or obviously fabricated |
+| **Evidence Quality** | Specific quotes, recent (within last 18 months), real platforms | URLs present but vague descriptions | No URLs, or obviously fabricated |
 | **Existing Solutions Gap** | Clear gap identified with named products | Some solutions exist but gap is arguable | Well-solved by existing products (named, reviewed) |
 | **Hackathon Feasibility** | Core demo buildable in hours with web tech | Needs moderate complexity but plausibly doable | Requires ML training, hardware, enterprise integrations, or restricted data |
 | **Scenario Specificity** | Vivid user story with concrete details | Somewhat specific but could be sharper | Generic, vague, or hypothetical |
@@ -112,6 +114,8 @@ Rank all surviving cards using this weighted formula:
 | **Uniqueness** | 5% | Novel angle = 10, somewhat fresh = 7, common idea = 4 |
 
 **Important**: Ranking determines file numbering order, NOT survival. All cards that pass the quality gate in Step 3 must be included in the output. A low-ranked card that passes quality is still written to output.
+
+**Soft cap**: Output 5-12 surviving cards. If >12 cards survive quality gates, re-evaluate borderline cards (those marked "Borderline" in any criterion) and eliminate the lowest-ranked ones until you reach 12 or can justify keeping more with explicit reasoning.
 
 ### Step 6: Write Output
 

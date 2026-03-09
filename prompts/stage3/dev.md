@@ -159,7 +159,11 @@ Launch a sub-agent using the **Agent tool** with the following task:
 > - Every exported module must be importable without errors
 > - Use the real SDKs specified in the Technical Plan (e.g., `@slack/bolt`, `openai`, `@notionhq/client`)
 
-Wait for this sub-agent to complete before proceeding to Phase 3.
+Wait for this sub-agent to complete.
+
+**Shared Layer Validation**: After the sub-agent finishes, run the project's verification command once. If it fails, re-run the Shared Layer agent with the error output included. Only proceed to Phase 3 after shared layer verification passes. Max 2 re-runs.
+
+---
 
 ---
 
@@ -234,15 +238,44 @@ After ALL waves are complete:
 
 ---
 
+## Success Criteria by Product Type
+
+| product_type | Verification | Success condition |
+|---|---|---|
+| `web_app` | `npm run build` | Exits 0, no TypeScript/compilation errors |
+| `slack_app` | `npm run build` (if TS) + `node -e "require('./src/app.js')"` | No import/syntax errors, manifest.json is valid JSON |
+| `cli_tool` | `node bin/cli.js --help` | Prints help text without errors |
+| `chrome_extension` | `npm run build` (if build step) | dist/ exists with manifest.json |
+| `vscode_extension` | `npm run compile` | No compilation errors |
+| `api_service` | `timeout 5 node src/server.js` | Starts without crash for 3+ seconds, then kill |
+
+## Mock vs Stub Definitions
+
+- **Mock** (NOT allowed at runtime): Hardcoded fake data returned by functions (e.g., `return [{name: "John", age: 30}]`), simulated API responses, placeholder images/text pretending to be real data.
+- **Stub** (allowed for ⏭️ modules only): Function/class signature with a `TODO` comment, throws "not implemented" error or returns empty/default value with comment explaining why.
+- **Test mock** (allowed in test files only): jest.mock(), sinon stubs — these are fine.
+
+## Self-Repair Loop Limits
+
+- **Scaffold**: max 3 fix attempts. If still failing, log the error and continue.
+- **Shared Layer**: max 3 fix attempts. If still failing, log the error and continue.
+- **Module Coding**: max 5 fix attempts per code unit.
+
+If any limit is exceeded, log the error clearly and proceed to the next phase.
+
+---
+
 ## Critical Rules
 
 1. **Follow the phases in order**: Scaffold → Shared Layer → Module Coding. Do not skip or reorder.
-2. **Use the correct verification command for the product_type** — `npm run build` for web_app, `npm run compile` for vscode_extension, syntax check for slack_app, etc. Do NOT use `npm run dev` (it starts a persistent server and never exits).
-3. **No mocking, no fake data** — use real API calls for ✅ modules, interface stubs for ⏭️ modules. Nothing in between.
+2. **Use the correct verification command for the product_type** — see Success Criteria table above. Do NOT use `npm run dev` (it starts a persistent server and never exits).
+3. **No mocking, no fake data** — use real API calls for ✅ modules, interface stubs for ⏭️ modules. See "Mock vs Stub Definitions" above.
 4. **Credentials via environment variables only** — `process.env.XXX` or `os.environ["XXX"]`. Never in code, never in files (except `.env.example` which has no values).
-5. **Self-repair loops are mandatory** — always verify after writing code and fix errors before moving on.
+5. **Self-repair loops are mandatory** — always verify after writing code and fix errors before moving on. See loop limits above.
 6. **All work happens inside the `demo/` subdirectory** — the scaffold creates it, all agents work within it.
 7. **Do not use `npm run dev`** — it starts a dev server that never exits and will cause the session to hang.
-8. **Full-stack web_app verification**: If the project has a `server/` directory, verify BOTH that `node server/index.js` starts without crash (test with a 3-second timeout) AND the client builds successfully. Use `"build": "vite build --outDir ../dist/client"` in the client's vite config.
+8. **Full-stack web_app verification**: If the project has a `server/` directory, verify BOTH: (1) Run `npm run build` for client. (2) Start server with `timeout 5 node server/index.js` — if it runs for 3+ seconds without crashing, it's healthy. Kill it after verification.
 9. **Follow the Development Plan** — the plan specifies exactly what to build. Don't improvise.
-9. **README must have real run instructions** — a user following your README should be able to get the product running in a real environment.
+10. **README must have real run instructions** — a user following your README should be able to get the product running in a real environment.
+11. **Validate shared layer before module coding** — After Shared Layer agent completes, run the verification command once. If it fails, re-run the Shared Layer agent with the error output. Only proceed to Module Coding after verification passes.
+12. **.env.example must be documented** — Each variable must have a comment: `# Required/Optional — Get from [URL or instructions]`. Use `SCREAMING_SNAKE_CASE` for all env var names.
