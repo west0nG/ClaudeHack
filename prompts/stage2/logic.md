@@ -71,8 +71,8 @@ Think of modules as functional units, not technical components. A module might s
 
 Map how modules interact:
 
-1. **Dependency graph**: Which modules depend on which? Are there circular dependencies (avoid these)?
-2. **Data flow**: What specific data passes between modules? Be concrete — name the data structures and fields.
+1. **Dependency graph**: Which modules depend on which? Circular dependencies must be avoided. If you identify a circular dependency, introduce an event/callback pattern to break the cycle and document the refactoring.
+2. **Data flow**: What specific data passes between modules? Be concrete — specify data structures to 2 levels of nesting. Example: `{score: number, reasons: string[], metadata: {source: string, timestamp: number}}`.
 3. **Sequencing**: Which modules must run first? Which can operate independently?
 
 ### Step 3: User Flow
@@ -173,3 +173,5 @@ Write `logic.md` to the current working directory with this structure:
 6. **Data flow must be concrete** — don't say "data passes between modules." Say "Module A outputs a `{score: number, reasons: string[]}` object that Module B consumes to render the recommendation."
 7. **Stay within concept boundaries** — reference the "What This Is NOT" section from the concept. Don't design modules for out-of-scope features.
 8. **Real integrations, not mock** — modules should be designed around real host platform APIs and SDKs. If a credential is needed, note it; the ConfigGate stage will handle credential collection later.
+9. **Host-environment mismatch handling** — if a functional requirement doesn't fit the chosen product_type's host environment, either (a) simplify the requirement to fit, or (b) note it as a Boundary ("out of scope for hackathon demo"). Do NOT change product_type at this stage.
+10. **Evidence traceability** — every claim about the target user's pain in the user flow should trace back to evidence from the Idea Card or concept.md.

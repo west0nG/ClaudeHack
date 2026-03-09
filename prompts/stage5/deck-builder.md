@@ -49,11 +49,11 @@ Plan 6-8 slides total:
 
 Create a single self-contained HTML file with:
 - CSS-only slide transitions (no JavaScript framework dependencies)
-- Keyboard navigation (left/right arrows, space bar)
+- Keyboard navigation: Arrow Right / Space / Enter = next slide. Arrow Left / Backspace = previous. Home = first slide. End = last slide. S = toggle speaker notes. Escape = close notes.
 - Clean, modern design with a dark theme
-- Large text, high contrast, minimal content per slide
+- Large text, high contrast, minimal content per slide (max 5 bullet points — if more, split into 2 slides)
 - Speaker notes hidden by default, togglable with 'S' key
-- Responsive layout (works on projector resolutions)
+- Responsive layout targeting 16:9 aspect ratio. Use CSS `vw`/`vh` units for font sizes and spacing. Minimum readable resolution: 1024x768.
 
 ---
 
@@ -103,7 +103,8 @@ Write `pitch-deck.html` to the current working directory. The file must be compl
 2. **No external JS libraries** — no Reveal.js, no frameworks. Pure HTML/CSS/vanilla JS
 3. **Readable from the back of the room** — large text, high contrast, minimal content per slide
 4. **Speaker notes are hidden** — only visible when toggled with 'S' key
-5. **Keyboard navigation works** — arrow keys and space bar must advance/retreat slides
-6. **Content comes from the pitch script** — do not invent new content, translate the script into visual slides
+5. **Keyboard navigation works** — Arrow Right / Space / Enter = next slide. Arrow Left / Backspace = previous. Home = first. End = last. S = toggle speaker notes. Escape = close notes.
+6. **Content comes from the pitch script** — do not invent new content, translate the script into visual slides. If script content doesn't fit 6-8 slides, prioritize Hook + Problem + Demo walkthrough — trim Closing if needed.
 7. **Include the source citation** — the hook's source must appear (small text) on the hook slide
 8. **Use Bash to verify** — after writing the file, use `wc -l pitch-deck.html` to confirm it was written successfully
+9. **Prefer simple Unicode emoji** — use check marks, arrows, warning signs. Avoid complex emoji that render differently across platforms (Mac vs Windows vs Linux).

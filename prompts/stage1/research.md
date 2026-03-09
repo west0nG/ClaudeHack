@@ -267,6 +267,16 @@ Rationale: [Why]
 
 ---
 
+## Sub-Agent Failure Handling
+
+Follow this fallback chain when sub-agents find insufficient evidence:
+
+1. **If Sub-Agent 1 (Template Search) finds <2 evidence items for ALL pain areas**: Mark this direction as LOW YIELD. Still run Sub-Agent 2 but with expanded search scope (try broader keywords, adjacent communities).
+2. **If Sub-Agent 2 also finds <2 NEW evidence items**: Skip Sub-Agent 3 (Critic). Output 0 Idea Cards for this direction. Write a brief `no-cards-reason.md` explaining why.
+3. **If a specific pain area has <2 evidence sources after both sub-agents**: Drop that pain area from consideration. Do not create an Idea Card for it.
+
+---
+
 ## Critical Rules
 
 1. **Do NOT fabricate evidence** — Every URL in an Idea Card must come from actual search results. If you cannot find real evidence for a pain point, do not create a card for it. This is the single most important rule.
@@ -275,3 +285,5 @@ Rationale: [Why]
 4. **Write files, don't just output text** — Your deliverables are the `idea-card-*.md` files written to the current directory.
 5. **Follow the Critic** — If the Critic says DROP, don't include it. If the Critic says MAYBE, only include it if you can strengthen it.
 6. **Hackathon-feasible only** — Every solution direction must be buildable as a compelling demo in hours, not months.
+7. **Minimum evidence threshold** — Each Idea Card must have at least 3 distinct evidence sources with real URLs. If a pain point has only 1-2 sources, it's too thin — either find more or drop it.
+8. **URL quality standard** — Every URL must be from a real, crawlable website. Prefer URLs from Reddit, HN, StackOverflow, GitHub Issues, industry blogs. Avoid generic SEO content farms or AI-generated listicles.

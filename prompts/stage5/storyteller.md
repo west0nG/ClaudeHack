@@ -47,6 +47,8 @@ Use **WebSearch** to find one compelling statistic, quote, or recent news item r
 - Recent (within the last 2 years)
 - Emotionally resonant or surprising
 
+**Fallback chain**: If WebSearch finds no statistic → search for an expert quote from industry leaders → if still nothing, use a concrete anecdote from the Idea Card evidence with source attribution. The hook must always have a verifiable source.
+
 ### Step 4: Write the Pitch Script
 
 Write a pitch script structured as follows. Each section should be written as natural speech — imagine presenting to a panel of judges. Include speaker notes in blockquotes for delivery guidance.
@@ -99,8 +101,9 @@ Source: [URL or citation for the hook's claim]
 
 1. **Be concrete, not abstract** — "saves 3 hours per week" beats "improves productivity"
 2. **Tell a story, not a feature list** — the Problem and Solution sections should flow as narrative
-3. **Ground the demo walkthrough in real code** — reference actual files, screens, or commands you found in `demo/`
-4. **Keep it short** — the entire script should be deliverable in 3-4 minutes
-5. **Hook must have a source** — no made-up statistics
+3. **Ground the demo walkthrough in real code** — only describe screens/features that actually exist in `demo/`. If a feature is incomplete, skip it — never describe aspirational functionality
+4. **Target word count: 400-600 words** — deliverable in 3-4 minutes at ~120 words/minute
+5. **Hook must have a source** — no made-up statistics. Follow the fallback chain if needed
 6. **Write for speaking, not reading** — short sentences, conversational tone, natural pauses
 7. **Connect everything** — the hook sets up the problem, the problem sets up the solution, the solution sets up the demo, the closing ties back to the hook
+8. **Speaker notes must be actionable** — e.g., "[Pause 2 seconds after stat for impact. Lower voice.] This is real. We built it." Not just "[delivery guidance]"
