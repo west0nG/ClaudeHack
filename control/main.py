@@ -145,9 +145,11 @@ async def async_main() -> None:
             logger.info("Resuming from archive: %s", archive_path)
 
             # Restore workspace (copy, not move — keep archive intact)
+            # Use symlinks=True to preserve symlinks instead of following them
+            # (Stage 5 creates symlinks to Stage 3 demo dirs that may be broken in archive)
             if workspace_dir.exists():
                 shutil.rmtree(workspace_dir)
-            shutil.copytree(str(archive_path), str(workspace_dir))
+            shutil.copytree(str(archive_path), str(workspace_dir), symlinks=True, ignore_dangling_symlinks=True)
             logger.info("Restored workspace from archive")
 
             # Load run metadata
