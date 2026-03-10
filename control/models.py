@@ -79,6 +79,7 @@ class HackathonBrief:
     constraints: list[str] = field(default_factory=list)
     evaluation_criteria: list[str] = field(default_factory=list)
     restrictions: list[str] = field(default_factory=list)
+    required_technologies: list[str] = field(default_factory=list)
     special_requirements: list[str] = field(default_factory=list)
     suggested_directions: list[str] = field(default_factory=list)
     raw_prompt: str = ""
@@ -100,6 +101,7 @@ class HackathonBrief:
             constraints=data.get("constraints", []),
             evaluation_criteria=data.get("evaluation_criteria", []),
             restrictions=data.get("restrictions", []),
+            required_technologies=data.get("required_technologies", []),
             special_requirements=data.get("special_requirements", []),
             suggested_directions=data.get("suggested_directions", []),
             raw_prompt=data.get("raw_prompt", ""),
@@ -116,6 +118,7 @@ class HackathonBrief:
             "constraints": self.constraints,
             "evaluation_criteria": self.evaluation_criteria,
             "restrictions": self.restrictions,
+            "required_technologies": self.required_technologies,
             "special_requirements": self.special_requirements,
             "suggested_directions": self.suggested_directions,
             "raw_prompt": self.raw_prompt,
@@ -141,6 +144,11 @@ class HackathonBrief:
             lines.append("### Restrictions")
             for r in self.restrictions:
                 lines.append(f"- {r}")
+            lines.append("")
+        if self.required_technologies:
+            lines.append("### Required Technologies")
+            for t in self.required_technologies:
+                lines.append(f"- {t}")
             lines.append("")
         if self.special_requirements:
             lines.append("### Special Requirements / Bonus Prizes")
