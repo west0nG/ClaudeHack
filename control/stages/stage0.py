@@ -99,6 +99,7 @@ async def run_stage0(
     raw_prompt: str,
     session_mgr: SessionManager,
     event_bus: EventBus,
+    model: str = "sonnet",
 ) -> HackathonBrief:
     """Execute Stage 0: Parse raw hackathon prompt into structured brief."""
 
@@ -114,7 +115,7 @@ async def run_stage0(
         prompt=prompt,
         working_dir=str(work_dir),
         allowed_tools=["Read", "Write"],
-        model="sonnet",
+        model=model,
         timeout_seconds=240,
         max_budget_usd=0.5,
     ))

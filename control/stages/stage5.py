@@ -86,6 +86,7 @@ async def _run_pitch_pipeline(
     theme: str,
     session_mgr: SessionManager,
     event_bus: EventBus,
+    model: str = "sonnet",
 ) -> Path | None:
     """Run the 2-session pitch pipeline for a single project.
 
@@ -141,7 +142,7 @@ async def _run_pitch_pipeline(
         prompt=storyteller_prompt,
         working_dir=str(storyteller_work_dir),
         allowed_tools=["Read", "Write", "Glob", "Grep", "WebSearch", "WebFetch"],
-        model="sonnet",
+        model=model,
         timeout_seconds=1200,
         max_budget_usd=3.0,
     ))
@@ -197,7 +198,7 @@ async def _run_pitch_pipeline(
         prompt=deck_prompt,
         working_dir=str(deck_work_dir),
         allowed_tools=["Read", "Write", "Glob", "Grep", "Bash"],
-        model="sonnet",
+        model=model,
         timeout_seconds=1200,
         max_budget_usd=3.0,
     ))
@@ -249,6 +250,7 @@ async def run_stage5(
     session_mgr: SessionManager,
     event_bus: EventBus,
     prd_dirs: list[Path] | None = None,
+    model: str = "sonnet",
 ) -> list[Path]:
     """Execute Stage 5: Pitch Deck Generation.
 
@@ -287,6 +289,7 @@ async def run_stage5(
         slug = _slug_from_project(project_dir)
         tasks.append(_run_pitch_pipeline(
             prd_dir, project_dir, slug, theme, session_mgr, event_bus,
+            model=model,
         ))
 
     logger.info("Stage 5: Launching %d pitch pipelines (2 sessions each)", len(tasks))

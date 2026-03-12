@@ -95,6 +95,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-config", action="store_true", help="Skip ConfigGate credential collection (use persistent store only)")
     parser.add_argument("--skip-pitch", action="store_true", help="Skip Stage 5 (pitch deck generation)")
     parser.add_argument("--no-archive", action="store_true", help="Skip archiving workspace after run")
+    parser.add_argument(
+        "--model",
+        choices=["sonnet", "opus"],
+        default="sonnet",
+        help="Claude model to use for AI sessions (default: sonnet)",
+    )
     return parser.parse_args()
 
 
@@ -154,6 +160,7 @@ async def async_main() -> None:
 
             # Load run metadata
             metadata = _load_run_metadata(workspace_dir)
+            model = (metadata.get("model") if metadata else None) or args.model
             if metadata:
                 brief = HackathonBrief.from_dict(metadata.get("brief", {}))
                 theme = metadata["theme"]
@@ -199,6 +206,7 @@ async def async_main() -> None:
                     theme=theme, session_mgr=session_mgr, event_bus=event_bus,
                     interests=metadata.get("interests") if metadata else None,
                     max_directions=max_directions, brief=brief,
+                    model=model,
                 )
 
             if next_stage <= 1:
@@ -220,6 +228,7 @@ async def async_main() -> None:
                 prd_dirs = await run_stage2(
                     idea_cards=idea_cards, theme=theme,
                     session_mgr=session_mgr, event_bus=event_bus,
+                    model=model,
                 )
 
             if not prd_dirs and next_stage <= 2:
@@ -243,13 +252,14 @@ async def async_main() -> None:
                 project_dirs = await run_stage3(
                     prd_dirs=approved_dirs, theme=theme,
                     session_mgr=session_mgr, event_bus=event_bus,
+                    model=model,
                 )
 
             if project_dirs:
                 if not args.skip_pitch and next_stage <= 5:
                     pitch_dirs = await run_stage5(
                         project_dirs, theme=theme, session_mgr=session_mgr,
-                        event_bus=event_bus,
+                        event_bus=event_bus, model=model,
                     )
                     copied = _copy_pitch_to_projects(project_dirs)
                     logger.info("Generated %d pitch decks, copied to %d projects", len(pitch_dirs), copied)
@@ -307,6 +317,7 @@ async def async_main() -> None:
                 theme=theme,
                 session_mgr=session_mgr,
                 event_bus=event_bus,
+                model=args.model,
             )
 
             logger.info("=" * 60)
@@ -323,6 +334,7 @@ async def async_main() -> None:
                         project_dirs, theme=theme, session_mgr=session_mgr,
                         event_bus=event_bus,
                         prd_dirs=[prd_dir] * len(project_dirs),
+                        model=args.model,
                     )
                     copied = _copy_pitch_to_projects(project_dirs)
                     logger.info("=" * 60)
@@ -366,6 +378,7 @@ async def async_main() -> None:
                 theme=theme,
                 session_mgr=session_mgr,
                 event_bus=event_bus,
+                model=args.model,
             )
 
             logger.info("=" * 60)
@@ -393,7 +406,7 @@ async def async_main() -> None:
                     sys.exit(1)
                 raw_prompt = prompt_path.read_text(encoding="utf-8")
             logger.info("Running Stage 0: Interpreting hackathon prompt (%d chars)", len(raw_prompt))
-            brief = await run_stage0(raw_prompt, session_mgr, event_bus)
+            brief = await run_stage0(raw_prompt, session_mgr, event_bus, model=args.model)
             logger.info("Interpreted theme: %s", brief.theme)
 
         # Save run metadata for resume support
@@ -416,6 +429,7 @@ async def async_main() -> None:
             interests=args.interests,
             max_directions=max_directions,
             brief=brief,
+            model=args.model,
         )
 
         logger.info("Stage 1 produced %d Idea Cards", len(idea_cards))
@@ -459,6 +473,7 @@ async def async_main() -> None:
             theme=brief.theme,
             session_mgr=session_mgr,
             event_bus=event_bus,
+            model=args.model,
         )
 
         if not prd_dirs:
@@ -488,6 +503,7 @@ async def async_main() -> None:
             theme=brief.theme,
             session_mgr=session_mgr,
             event_bus=event_bus,
+            model=args.model,
         )
 
         logger.info("=" * 60)
@@ -502,7 +518,7 @@ async def async_main() -> None:
             if not args.skip_pitch:
                 pitch_dirs = await run_stage5(
                     project_dirs, theme=brief.theme, session_mgr=session_mgr,
-                    event_bus=event_bus,
+                    event_bus=event_bus, model=args.model,
                 )
                 copied = _copy_pitch_to_projects(project_dirs)
                 logger.info("=" * 60)
@@ -567,6 +583,7 @@ def _save_run_metadata(brief: HackathonBrief, args: argparse.Namespace) -> None:
         "brief": brief.to_dict(),
         "interests": args.interests,
         "mode": args.mode,
+        "model": args.model,
         "started_at": datetime.now().isoformat(),
     }
     (workspace_dir / "run-metadata.json").write_text(

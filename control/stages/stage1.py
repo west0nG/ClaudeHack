@@ -186,6 +186,7 @@ async def _stream_dedup_compare(
     new_cards: list[Path],
     existing_pool: list[Path],
     session_mgr: SessionManager,
+    model: str = "sonnet",
 ) -> list[Path]:
     """Compare new cards against existing pool for obvious duplicates.
 
@@ -234,7 +235,7 @@ Output ONLY the JSON array, nothing else."""
         prompt=prompt,
         working_dir=str(dedup_dir),
         allowed_tools=["Read"],
-        model="sonnet",
+        model=model,
         timeout_seconds=120,
         max_budget_usd=0.5,
         max_retries=0,
@@ -289,6 +290,7 @@ async def run_stage1(
     interests: str | None = None,
     max_directions: int | None = None,
     brief: HackathonBrief | None = None,
+    model: str = "sonnet",
 ) -> list[Path]:
     """Execute Stage 1: Idea Discovery. Returns paths to final Idea Cards."""
 
@@ -321,7 +323,7 @@ async def run_stage1(
         prompt=main_prompt,
         working_dir=str(main_dir),
         allowed_tools=["Read", "Write", "WebSearch"],
-        model="sonnet",
+        model=model,
         timeout_seconds=360,
         max_budget_usd=1.0,
     ))
@@ -372,7 +374,7 @@ async def run_stage1(
             prompt=research_prompt,
             working_dir=str(WORKSPACE_DIR / f"research-{d.slug}"),
             allowed_tools=["WebSearch", "WebFetch", "Agent", "Read", "Write", "Glob", "Grep"],
-            model="sonnet",
+            model=model,
             max_budget_usd=5.0,
             timeout_seconds=1800,
         )
@@ -407,7 +409,7 @@ async def run_stage1(
             logger.info("Added %d initial cards to pool from %s", len(new_cards), config.session_id)
         else:
             # Compare against existing pool (outside lock to avoid blocking)
-            kept = await _stream_dedup_compare(new_cards, existing_pool, session_mgr)
+            kept = await _stream_dedup_compare(new_cards, existing_pool, session_mgr, model=model)
             async with card_pool_lock:
                 card_pool.extend(kept)
             logger.info(
@@ -465,7 +467,7 @@ async def run_stage1(
             prompt=dedup_prompt,
             working_dir=str(WORKSPACE_DIR / "dedup"),
             allowed_tools=["Read", "Write", "Glob"],
-            model="sonnet",
+            model=model,
             timeout_seconds=600,
             max_budget_usd=1.0,
         ))

@@ -67,6 +67,7 @@ async def _run_card_pipeline(
     theme: str,
     session_mgr: SessionManager,
     event_bus: EventBus,
+    model: str = "sonnet",
 ) -> Path | None:
     """Run the 3-session pipeline for a single Idea Card.
 
@@ -106,7 +107,7 @@ async def _run_card_pipeline(
         prompt=concept_prompt,
         working_dir=str(concept_work_dir),
         allowed_tools=["Agent", "Read", "Write", "Glob", "Grep", "WebSearch", "WebFetch"],
-        model="sonnet",
+        model=model,
         timeout_seconds=1200,
         max_budget_usd=3.0,
     ))
@@ -162,7 +163,7 @@ async def _run_card_pipeline(
         prompt=logic_prompt,
         working_dir=str(logic_work_dir),
         allowed_tools=["Agent", "Read", "Write", "Glob", "Grep"],
-        model="sonnet",
+        model=model,
         timeout_seconds=1200,
         max_budget_usd=3.0,
     ))
@@ -204,7 +205,7 @@ async def _run_card_pipeline(
         prompt=technical_prompt,
         working_dir=str(tech_work_dir),
         allowed_tools=["Agent", "Read", "Write", "Glob", "Grep"],
-        model="sonnet",
+        model=model,
         timeout_seconds=1200,
         max_budget_usd=3.0,
     ))
@@ -251,6 +252,7 @@ async def run_stage2(
     theme: str,
     session_mgr: SessionManager,
     event_bus: EventBus,
+    model: str = "sonnet",
 ) -> list[Path]:
     """Execute Stage 2: PRD Generation.
 
@@ -268,7 +270,7 @@ async def run_stage2(
     tasks = []
     for card_path in idea_cards:
         slug = _slugify(card_path)
-        tasks.append(_run_card_pipeline(card_path, slug, theme, session_mgr, event_bus))
+        tasks.append(_run_card_pipeline(card_path, slug, theme, session_mgr, event_bus, model=model))
 
     logger.info("Stage 2: Launching %d card pipelines (3 sessions each)", len(tasks))
     results = await asyncio.gather(*tasks)

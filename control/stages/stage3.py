@@ -123,6 +123,7 @@ async def _run_project_pipeline(
     session_mgr: SessionManager,
     event_bus: EventBus,
     credentials: dict[str, str] | None = None,
+    model: str = "sonnet",
 ) -> Path | None:
     """Run the 3-session pipeline for a single project.
 
@@ -173,7 +174,7 @@ async def _run_project_pipeline(
         prompt=plan_prompt,
         working_dir=str(plan_work_dir),
         allowed_tools=["Read", "Write", "Glob", "Grep"],
-        model="sonnet",
+        model=model,
         timeout_seconds=600,
         max_budget_usd=2.0,
     ))
@@ -216,7 +217,7 @@ async def _run_project_pipeline(
         prompt=dev_prompt,
         working_dir=str(dev_work_dir),
         allowed_tools=["Bash", "Agent", "Read", "Write", "Glob", "Grep"],
-        model="sonnet",
+        model=model,
         timeout_seconds=4800,
         max_budget_usd=8.0,
         extra_env=credentials or None,
@@ -246,7 +247,7 @@ async def _run_project_pipeline(
         prompt=review_prompt,
         working_dir=str(dev_work_dir),
         allowed_tools=["Bash", "Agent", "Read", "Write", "Glob", "Grep"],
-        model="sonnet",
+        model=model,
         timeout_seconds=2400,
         max_budget_usd=5.0,
         extra_env=credentials or None,
@@ -288,7 +289,7 @@ async def _run_project_pipeline(
             prompt=bounce_prompt,
             working_dir=str(dev_work_dir),
             allowed_tools=["Bash", "Agent", "Read", "Write", "Glob", "Grep"],
-            model="sonnet",
+            model=model,
             timeout_seconds=4800,
             max_budget_usd=8.0,
             extra_env=credentials or None,
@@ -301,7 +302,7 @@ async def _run_project_pipeline(
                 prompt=review_prompt,
                 working_dir=str(dev_work_dir),
                 allowed_tools=["Bash", "Agent", "Read", "Write", "Glob", "Grep"],
-                model="sonnet",
+                model=model,
                 timeout_seconds=2400,
                 max_budget_usd=5.0,
                 extra_env=credentials or None,
@@ -353,6 +354,7 @@ async def run_stage3(
     theme: str,
     session_mgr: SessionManager,
     event_bus: EventBus,
+    model: str = "sonnet",
 ) -> list[Path]:
     """Execute Stage 3: Demo Development.
 
@@ -386,6 +388,7 @@ async def run_stage3(
         tasks.append(_run_project_pipeline(
             prd_dir, slug, theme, session_mgr, event_bus,
             credentials=credentials if credentials else None,
+            model=model,
         ))
 
     logger.info("Stage 3: Launching %d project pipelines (3 sessions each)", len(tasks))
