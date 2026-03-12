@@ -8,6 +8,10 @@
 
 Hackathon Agent 是一个完全自主的 AI 黑客松参赛系统。它不是辅助人类参赛的工具，而是**独立参赛的选手**——从发现需求、定义问题、编写产品方案，到完成 Demo 开发，全程由 Agent 主导，用户仅作为观察者在关键节点进行确认。
 
+**定位转变：从 hackathon demo 到 indie developer MVP。**
+
+时间不再是筛选标准。Agent 的时间成本会随模型能力提升持续下降，token 成本也在快速降低。真正成立的约束是 token 消耗量——而这个消耗是值得的。筛选标准从"hackathon 能不能做"换成两条核心原则：（1）**软件可解决**——排除需要硬件、物理交互、线下服务的方向；（2）**Agent 可独立完成**——排除需要人类专业判断才能推进的方向。
+
 **核心转变：做真实的产品，不做 Mock。**
 
 产品必须在真实环境里能跑起来。一个 Slack Bot 如果没有真实的 Slack workspace，它就不是这个产品——它只是关于这个产品的一张图纸。宁可产出 3 个真实运行的项目，也不要 7 个有一半是假的。
@@ -80,7 +84,7 @@ Hackathon Agent 是一个完全自主的 AI 黑客松参赛系统。它不是辅
 
 **编排方式：混合模式**
 - **阶段级编排**由中控脚本驱动（确定性 if/then 逻辑）
-- **角色级协作**由 Claude Code session 内部通过 Agent tool 自行管理（如 Research session 内部 spawn 模板搜索、自由搜索、Critic 三个 sub-agent）
+- **角色级协作**由 Claude Code session 内部通过 Agent tool 自行管理（如 Research session 内部 spawn Search、Synthesis 两个 sub-agent）
 
 选择脚本而非 Agent 做中控的原因：流程编排是完全确定性的逻辑（if/then），不需要 AI 判断，用 Agent 做既浪费 token 又不可靠。
 
@@ -155,7 +159,7 @@ Brief 的 constraints/criteria/restrictions 渲染为文本块
 
 ### 4.1 目标
 
-从 hackathon 主题出发，自主发现真实用户痛点，产出 10-20 个有证据支撑的 Idea Card。
+从 hackathon 主题出发，自主发现真实用户痛点，产出 5-15 个有证据支撑的 Idea Card。
 
 **每张 Idea Card 必须包含外部依赖评估**，让用户在 ReviewGate 阶段就能根据自身资源做筛选。
 
@@ -165,13 +169,15 @@ Brief 的 constraints/criteria/restrictions 渲染为文本块
 - 聚焦**真实用户痛点**路线，不走"做有趣的东西"路线
 - 寻找的是"痛点假设"而非"已验证的痛点"——有证据支撑即可，不需要百分百确认
 - 只做筛选（淘汰明显不行的），不做挑选（不主观排序）
+- **核心筛选标准**：（1）软件可解决——排除需要硬件、物理交互、线下服务的方向；（2）Agent 可独立完成——排除需要人类专业判断才能推进的方向（如需医生验证的医疗诊断），但不排除需要较长开发时间或较多 token 的方向
 
 ### 4.3 粗筛标准（主 Agent）
 
-- **可理解性**：评委能否在 30 秒内理解这个痛点
+- **软件可解决**：这个痛点能否用纯软件解决——排除需要硬件、物理交互、线下服务的方向
+- **Agent 可独立完成**：能否由 Agent 独立完成开发——排除需要人类专业判断才能推进的方向
 - **痛感共鸣度**：是否能引起广泛共鸣
 - **排除项**：需要法律合规、银行合作、硬件依赖等明显做不了的方向
-- **外部环境可及性**（🆕）：产品所需的宿主环境（Slack workspace、VS Code、浏览器扩展商店等）是否在 hackathon 场景下可获取？高度依赖难以获取的平台权限的方向，降低优先级
+- **外部环境可及性**：产品所需的宿主环境（Slack workspace、VS Code、浏览器扩展商店等）是否可获取？高度依赖难以获取的平台权限的方向，降低优先级
 
 ### 4.4 Agent 编排
 
@@ -179,41 +185,57 @@ Brief 的 constraints/criteria/restrictions 渲染为文本块
 
 由一个 Claude Code session 完成以下工作：
 
-- **人群展开**：根据主题列出相关角色和人群（5-10 个方向）
-- **粗筛**：排除明显不适合 hackathon 的方向
+- **灵感搜索**（🆕）：在人群发散之前，先执行 3-5 次轻量级 WebSearch，拓宽 Claude 的联想空间，发现自身知识盲区里的人群和痛点角度。搜索定位是灵感补充，不是深度研究（深度研究是 Research Agent 的职责）。不需要 WebFetch 读完整页面，只看搜索结果的标题和摘要
+- **人群展开**：根据主题 + 搜索灵感列出相关角色和人群（8-12 个方向）
+- **粗筛**：排除不符合"软件可解决 + Agent 可独立完成"标准的方向
 
-此步骤不需要搜索，靠 Agent 自身知识完成。
+输出 JSON 中每个方向包含以下字段：
+- `slug`：方向标识
+- `persona`：目标人群描述
+- `relevance`：high / medium
+- `scope`（🆕）：`"broad"`（痛点空间大，Research 预期产出 2-5 张卡）或 `"focused"`（痛点集中，预期 1-2 张卡）
+- `likely_product_types`（🆕）：最可能的产品形态列表（如 `["web_app", "cli_tool"]`），为 ReviewGate 和 Research Agent 提供参考，精度预期不高——Stage 2 Session 1 会正式确定
+- `pain_areas`：痛点假设列表
 
 #### 4.4.2 Research Sessions（每个人群方向 × 1）✅ 已实现
 
-每个 Research session 内部通过 Claude Code 的 **Agent tool** 自行 spawn 3 个 sub-agent：
+每个 Research session 内部通过 Claude Code 的 **Agent tool** 自行 spawn 2 个 sub-agent：
 
-**Sub-Agent 1: 模板搜索**（通过 Agent tool）
-- 使用结构化关键词组合搜索
-- Reddit、HackerNews、Twitter/X 等平台
-- 查找投诉、变通方法、"I wish..." 帖子、统计数据
+**Sub-Agent 1: Search**（通过 Agent tool，按 pain area 可并行拆分）
+- 原则驱动的搜索（非模板驱动），核心搜索原则：
+  1. 搜行为描述优于搜情绪表达（`"every week I have to"` > `"so frustrated with"`）
+  2. 先确定人群在哪里讨论问题（哪些 subreddit、论坛），再定向搜
+  3. 搜 workaround 和手搓方案（Zapier 自动化、Google Sheets 公式、Python 脚本）
+  4. 搜对现有工具的具体不满和替代品讨论
+- 对于 `scope: "broad"` 的方向，按 pain area 拆分并行（每个 pain area 一个独立 Search sub-agent），上下文隔离提高搜索质量
+- 对于 `scope: "focused"` 的方向，单个 Search sub-agent 即可
+- 每个 pain area 做 3-5 次搜索，总共不超过 10 次
+- 每个 sub-agent 写一个 findings 文件（`findings-{pain_area}.md`）
 
-**Sub-Agent 2: 自由搜索**（通过 Agent tool）
-- 开放式探索，不限于假设的痛点
-- 寻找模板搜索可能遗漏的意外方向
+**Sub-Agent 2: Synthesis**（通过 Agent tool，独立上下文）
+- 只读 Search 产出的 findings 文件，不继承搜索过程的上下文噪音
+- 将零散证据编织成有说服力的用户故事，提炼痛点，构思解决方向
+- 内含自审逻辑（吸收原 Critic 角色的批判性审视功能），用 Quality Gates 作为检查清单，但不作为硬性 RECOMMEND/DROP 门槛
+- 根据 `scope` 字段控制产出量：`"broad"` 产出 2-5 张卡，`"focused"` 产出 1-2 张卡
 
-**Sub-Agent 3: Critic**（通过 Agent tool）
-- 读取前两个 sub-agent 的产出
-- 质疑证据真实性和时效性
-- 评估严重性、频率、现有方案
-- 建议最强的痛点和更好的框定方式
+**Quality Gates**（2 条原则，替代原 5 条硬性门槛）：
+1. 搜索过程中是否找到了真实的用户在描述这个痛点（不要求精确的 URL 数量，但需要有真实证据支撑）
+2. 这个痛点是否能用软件解决，并且 Agent 能在合理时间内做出 MVP
 
-> **实现说明**：原设计为中控分别启动 3 个独立 session。实际实现改为 1 个 Research session 内部管理 3 个 sub-agent——让 Claude Code session 自己管理 sub-agent 的生命周期更自然，能在内部协调循环、共享文件上下文，减少中控脚本的复杂度。
+> **实现说明**：原设计为 3 个串行 sub-agent（模板搜索 → 自由搜索 → Critic）。新设计简化为 2 个 sub-agent（Search + Synthesis），合并了搜索角色、取消独立 Critic（自审合并到 Synthesis）、采用原则驱动而非模板驱动的搜索策略。
 
-每个 Research session 产出 1-3 个 `idea-card-*.md` 文件。
+每个 Research session 产出 1-5 个 `idea-card-*.md` 文件（取决于 scope）。
 
 #### 4.4.3 去重 Agent ✅ 已实现
 
-独立的 Dedup session（`prompts/stage1/dedup.md`）：
+采用**流式去重 + 最终轻量审查**架构（替代原批处理方案）：
 
-- 读取所有 Research session 产出的 Idea Card（中控复制到 `dedup/input/`）
-- 合并重复、淘汰证据不足的
-- 如果 Dedup session 失败，中控会 fallback 使用 raw cards
+**流式去重**：中控维护累积的 Idea Card 池。每当一个 Research session 完成并产出卡片，中控把新卡片和池子里已有的卡片做比较（轻量 `claude -p` 调用）。流式阶段只做明显重复的合并，不做细粒度质量筛选。
+
+**最终轻量审查**：所有 Research session 完成后，对流式去重后的卡片池做一次最终审查——检查遗漏的重复、格式标准化、按质量排序确定文件编号。去掉了原 Dedup 中的 5 因子加权排名公式，改为让 Agent 做综合判断排序。
+
+- 筛选标准与新 Quality Gates 对齐：有真实证据支撑 + 软件可解决且 Agent 可独立完成
+- 如果 Dedup 失败，中控会 fallback 使用 raw cards
 
 ### 4.5 运行模式 ✅ 已实现
 
@@ -235,14 +257,14 @@ Brief 的 constraints/criteria/restrictions 渲染为文本块
 ### 4.6 Session 规模
 
 假设 7 个人群方向：
-- 1 个主 Agent session
-- 7 个 Research sessions（每个内部 spawn 3 个 sub-agent）
-- 1 个 Dedup session
-- 共 9 个 Claude Code sessions（最多 5 个并行，由 Semaphore 控制）
+- 1 个主 Agent session（含 3-5 次灵感搜索）
+- 7 个 Research sessions（每个内部 spawn 2 个 sub-agent：Search + Synthesis）
+- 流式去重（轻量 claude -p 调用，每张新卡一次）+ 1 次最终审查
+- 共约 9 个 Claude Code sessions + N 次轻量去重调用（最多 5 个并行，由 Semaphore 控制）
 
 ### 4.7 阶段一产出
 
-10-20 个标准格式的 Idea Card 文件，存放于汇总目录。
+5-15 个标准格式的 Idea Card 文件，存放于汇总目录。
 
 ---
 
@@ -257,8 +279,10 @@ Brief 的 constraints/criteria/restrictions 渲染为文本块
 
 ## 证据
 
-- [来源1]：[平台名称 + 链接 + 简要描述]
-- [来源2]：[平台名称 + 链接 + 简要描述]
+[简化描述格式，一两句话描述每条发现。提到具体平台和具体内容即可，不需要完整 URL、日期、互动数据。]
+
+- [来源1]：[一两句话描述发现]
+- [来源2]：[一两句话描述发现]
 - ...
 
 ## 现有方案及不足
@@ -267,15 +291,10 @@ Brief 的 constraints/criteria/restrictions 渲染为文本块
 
 ## 解决方向
 
-### 方向一：[名称]
-[一两句话描述] ⭐ 推荐度：高/中/低
-推荐理由：[为什么 Agent 认为这个方向最有潜力]
+[简化为方向提示，不做详细评估。产品设计留给 Stage 2。]
 
-### 方向二：[名称]
-[一两句话描述] ⭐ 推荐度：高/中/低
-
-### 方向三：[名称]（可选）
-[一两句话描述] ⭐ 推荐度：高/中/低
+- [方向一]：[一两句话描述可能的产品方向]
+- [方向二]：[一两句话描述可能的产品方向]（可选）
 
 ## 外部依赖评估（🆕）
 
@@ -288,7 +307,7 @@ Brief 的 constraints/criteria/restrictions 渲染为文本块
 **综合可及性评估**：高 / 中 / 低
 [一句话说明：什么样的用户能顺利部署这个产品]
 
-> 注意：以上推荐排序仅为初步判断，不是定论。PRD 阶段应重新评估所有方向。
+> 注意：解决方向仅为初步提示，不是定论。产品设计由 Stage 2 负责。
 ```
 
 ---
@@ -1048,12 +1067,11 @@ hackathon-agent/
 | 阶段 | 角色 | 数量 | 职责 | 形式 |
 |------|------|------|------|------|
 | 零 | Interpreter | 0-1 | 解析复杂赛题为结构化 Brief | Claude Code session |
-| 一 | 主 Agent | 1 | 人群展开、粗筛（含外部环境可及性）→ JSON | Claude Code session |
-| 一 | Research | 每人群 1 个 | 内部管理 3 sub-agents，产出 Idea Card（含依赖评估）| Claude Code session |
-| 一 | ├ 模板搜索 | (内部) | 结构化关键词搜索痛点 | Agent tool sub-agent |
-| 一 | ├ 自由搜索 | (内部) | 开放式探索发现痛点 | Agent tool sub-agent |
-| 一 | └ Critic | (内部) | 质疑痛点真实性、评估证据 | Agent tool sub-agent |
-| 一 | Dedup Agent | 0-1 | 去重、质量过滤、排名（卡片 ≤3 时跳过）| Claude Code session |
+| 一 | 主 Agent | 1 | 灵感搜索 + 人群展开、粗筛（软件可解决 + Agent 可独立完成）→ JSON（含 scope、likely_product_types）| Claude Code session |
+| 一 | Research | 每人群 1 个 | 内部管理 2 sub-agents，产出 Idea Card（含依赖评估）| Claude Code session |
+| 一 | ├ Search | (内部, 按 pain area 可并行) | 原则驱动搜索痛点，写 findings 文件 | Agent tool sub-agent |
+| 一 | └ Synthesis | (内部) | 独立上下文合成 Idea Card，含自审（吸收原 Critic 功能）| Agent tool sub-agent |
+| 一 | Dedup | 流式 + 最终审查 | 流式去重（每张新卡轻量比较）+ 最终轻量审查（卡片 ≤3 时跳过）| claude -p 调用 |
 | — | ReviewGate | — | 人工筛选 Idea Card（展示依赖评估）| Dashboard UI / CLI |
 | 二 | Session 1: 产品定义 | 每 Idea 1 个 | 验证痛点、确定 product_type、概念层定义、自审 | Claude Code session |
 | 二 | Session 2: 产品设计 | 每 Idea 1 个 | 功能模块（宿主环境真实概念）、模块关系、用户流程 | Claude Code session |
@@ -1082,11 +1100,13 @@ hackathon-agent/
 
 ### 13.1 Stage 1
 
-| 循环 | 参与角色 | 轮次上限 | 触发条件 |
-|------|----------|----------|----------|
-| Research ↔ Critic | Research + Critic | 1-2 轮 | Critic 质疑痛点 |
+| 机制 | 参与角色 | 说明 |
+|------|----------|------|
+| Synthesis 自审 | Synthesis sub-agent | 合成 Idea Card 时用 Quality Gates 做自审检查，证据不足的发现不产出卡片 |
+| 流式去重 | 中控 + 轻量 claude -p | 每张新卡与已有池比较，明显重复时合并 |
+| 最终审查 | 中控 + claude -p | 检查遗漏重复、格式标准化、质量排序 |
 
-失败处理：Critic 质疑后 Research 无法有效回应 → 该 Idea Card 自然淘汰
+失败处理：Synthesis 自审认为证据不足 → 不产出该 Idea Card（自然淘汰，非硬性门槛）
 
 ### 13.2 Stage 2
 
@@ -1245,6 +1265,27 @@ hackathon-agent/
 | 幻灯片导航 | CSS-only slides + 键盘事件 | 最小化依赖，投影仪场景可靠 |
 | `--skip-pitch` | 跳过 Stage 5 | 开发测试时不需要 pitch deck |
 | Session 预算 | $3/session | 与 Stage 2 session 复杂度相当 |
+
+### Stage 1 Redesign 决策
+
+| 决策 | 选择 | 理由 |
+|------|------|------|
+| 整体定位 | 从 hackathon demo 转向 indie developer MVP | 时间不再是约束，token 消耗是真正约束且值得投入 |
+| 筛选标准 | 软件可解决 + Agent 可独立完成 | 替代 hackathon feasibility，更多方向存活进入 Stage 2 |
+| Main Agent 灵感搜索 | 3-5 次轻量 WebSearch | 拓宽联想空间，发现知识盲区里的人群和痛点角度 |
+| scope 字段 | broad / focused 标注方向规模 | 驱动 Research Agent 差异化产出量，大方向深挖多角度 |
+| likely_product_types 字段 | 产品形态预判 | 为 ReviewGate 展示外部依赖、Research 参考产品多样性 |
+| Search Agent 合并 | Template + Free → 统一 Search | 两者区别不够清晰，合并减少串行步骤 |
+| 搜索策略 | 原则 + 示例 + 约束（非模板） | 模板越多 Agent 越机械，site: 搜索大幅失效 |
+| Search 并行拆分 | broad 方向按 pain area 拆分并行 | 上下文隔离，避免后半段注意力稀释 |
+| Critic 取消 | 合并到 Synthesis 自审 | 避免过度过滤好想法，减少与合成逻辑的重叠 |
+| Synthesis 独立 sub-agent | 不由 Research Agent 自己执行 | 搜索和合成是不同任务，独立上下文减少噪音 |
+| 证据格式简化 | 一两句话描述（非完整 URL+日期+引用） | 保留"强迫搜索"功能，去掉格式负担 |
+| Quality Gates 简化 | 2 条原则（非 5 条硬性门槛） | 配合定位转变和 Critic 取消 |
+| Solution Directions 简化 | 方向提示（非完整评估+推荐度） | Research Agent 核心能力是搜索验证，产品设计留给 Stage 2 |
+| Dedup 架构 | 流式去重 + 最终轻量审查（非批处理） | 与 Research 并行提速，减少上下文压力 |
+| Dedup 排名 | Agent 综合判断（非 5 因子加权公式） | LLM 不会精确执行百分比权重 |
+| 不加反平庸排除机制 | 保留 | 平庸的根源是切入角度太泛，应在 Research 阶段通过深挖解决 |
 
 ---
 

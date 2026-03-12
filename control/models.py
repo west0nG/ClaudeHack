@@ -67,7 +67,9 @@ class CrowdDirection:
     slug: str
     persona: str
     relevance: str
-    pain_areas: list[str]
+    scope: str = "broad"
+    likely_product_types: list[str] = field(default_factory=list)
+    pain_areas: list[str] = field(default_factory=list)
 
 
 @dataclass

@@ -8,8 +8,8 @@
      and the Dedup agent must output cards conforming to this format.
 
      Key principles:
-     - Ground everything in REAL evidence (URLs, quotes, data)
-     - Preserve optionality: offer multiple solution directions
+     - Ground everything in REAL evidence (search findings, quotes)
+     - Preserve optionality: solution directions are hints, not decisions
      - Do NOT commit to a single solution — that happens in Stage 2
      ============================================================ -->
 
@@ -35,26 +35,22 @@
 
 ## Evidence
 
-<!-- List real sources that validate the pain point described above.
-     Minimum 2 sources required, aim for 3+.
-     Acceptable sources: Reddit posts, HackerNews threads, tweets,
-     forum discussions, product reviews, survey data, news articles.
-
-     Each entry format:
-       - [Source Name]: [Platform] — [URL] — [Brief description of what it shows]
+<!-- Describe real findings that validate the pain point above.
+     Use 1-2 sentence descriptions per finding. Mention the platform
+     and specific content found, but full URLs/dates/engagement
+     metrics are NOT required.
 
      GOOD:
-       - r/freelance complaint thread: Reddit — https://reddit.com/r/freelance/... —
-         "I spend my first hour every day just figuring out what's due" (847 upvotes, 2024)
+       - Reddit r/freelanceDesign: Multiple threads discuss revision
+         tracking chaos, with users describing 2+ hours/week spent
+         manually reconciling client feedback across tools.
 
      BAD:
-       - "Many freelancers struggle" (no URL, no specifics)
+       - "Many freelancers struggle" (no platform, no specifics) -->
 
-     Fabricated URLs will invalidate the entire card. -->
-
-- [Source 1]: [Platform] — [URL] — [Description with key quote or data point]
-- [Source 2]: [Platform] — [URL] — [Description with key quote or data point]
-- [Source 3]: [Platform] — [URL] — [Description with key quote or data point]
+- [1-2 sentence description of finding, mentioning platform and specific content]
+- [1-2 sentence description of finding, mentioning platform and specific content]
+- [1-2 sentence description of finding, mentioning platform and specific content]
 
 ## Existing Solutions & Gaps
 
@@ -75,37 +71,40 @@
 
 [Named products, user reviews, concrete shortcomings. Actual market research, not assumptions.]
 
+## External Dependency Assessment
+
+<!-- Evaluate what external services, APIs, or platform access
+     this idea would require to build an MVP.
+
+     Dependency types:
+     - carrier: Required platform/ecosystem (e.g., Slack workspace, Chrome Web Store)
+     - functional: APIs/services for core features (e.g., OpenAI API, Stripe)
+     - dev: Development tools (e.g., specific SDKs, databases)
+
+     Accessibility levels:
+     - High: Free tier available, self-service signup, no approval needed
+     - Medium: Requires account setup, may need API keys, free tier exists
+     - Low: Requires paid plans, approval process, or institutional access -->
+
+| Dependency Type | Specific Service | Necessity | Accessibility |
+|-----------------|------------------|-----------|---------------|
+| ...             | ...              | ...       | ...           |
+
+**Overall Accessibility**: High / Medium / Low
+[One sentence explanation]
+
 ## Solution Directions
 
-<!-- Propose 2-3 distinct approaches to solving the pain point.
-     Each direction should be a genuinely different strategy,
-     not variations of the same idea.
+<!-- Suggest 1-2 possible product directions as brief hints.
+     These are NOT detailed evaluations — just initial pointers
+     for Stage 2 to explore further. No High/Medium/Low ratings needed.
 
-     Assign a recommendation level (High / Medium / Low) with rationale.
-     These are INITIAL judgments — Stage 2 (PRD) will re-evaluate.
+     GOOD: "A browser extension that overlays revision status
+     across design tools, auto-detecting approval comments."
 
-     At least 2 directions required. 3rd is optional.
-     Do NOT pick a winner — preserve optionality for Stage 2. -->
+     BAD: A full paragraph with feasibility analysis and ratings. -->
 
-### Direction 1: [Name]
+- [1-2 sentence hint at a possible product direction]
+- [1-2 sentence hint at another possible product direction]
 
-[1-2 sentence description of the approach]
-
-Recommendation: **High** / **Medium** / **Low**
-Rationale: [Why this level — consider feasibility, evidence strength, demo potential]
-
-### Direction 2: [Name]
-
-[1-2 sentence description of the approach]
-
-Recommendation: **High** / **Medium** / **Low**
-Rationale: [Why this level]
-
-### Direction 3: [Name] *(optional)*
-
-[1-2 sentence description of the approach]
-
-Recommendation: **High** / **Medium** / **Low**
-Rationale: [Why this level]
-
-> **Note**: These are initial judgments only. The PRD stage will re-evaluate all directions with deeper technical and product analysis.
+> **Note**: Solution directions are preliminary hints only, not conclusions. Product design decisions are made in Stage 2.
