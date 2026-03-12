@@ -107,7 +107,7 @@ async def _run_card_pipeline(
         working_dir=str(concept_work_dir),
         allowed_tools=["Agent", "Read", "Write", "Glob", "Grep", "WebSearch", "WebFetch"],
         model="sonnet",
-        timeout_seconds=600,
+        timeout_seconds=1200,
         max_budget_usd=3.0,
     ))
 
@@ -163,7 +163,7 @@ async def _run_card_pipeline(
         working_dir=str(logic_work_dir),
         allowed_tools=["Agent", "Read", "Write", "Glob", "Grep"],
         model="sonnet",
-        timeout_seconds=600,
+        timeout_seconds=1200,
         max_budget_usd=3.0,
     ))
 
@@ -205,7 +205,7 @@ async def _run_card_pipeline(
         working_dir=str(tech_work_dir),
         allowed_tools=["Agent", "Read", "Write", "Glob", "Grep"],
         model="sonnet",
-        timeout_seconds=600,
+        timeout_seconds=1200,
         max_budget_usd=3.0,
     ))
 

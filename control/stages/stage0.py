@@ -115,7 +115,7 @@ async def run_stage0(
         working_dir=str(work_dir),
         allowed_tools=["Read", "Write"],
         model="sonnet",
-        timeout_seconds=120,
+        timeout_seconds=240,
         max_budget_usd=0.5,
     ))
 

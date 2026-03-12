@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from typing import Callable
 
 import websockets
 from websockets.server import serve
@@ -22,7 +23,7 @@ class WebSocketServer:
         self._port = port
         self._clients: set[websockets.WebSocketServerProtocol] = set()
         self._server = None
-        self._handlers: dict[str, list[callable]] = {}
+        self._handlers: dict[str, list[Callable]] = {}
 
         # Subscribe to all events
         event_bus.subscribe(self._on_event)

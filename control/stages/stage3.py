@@ -144,7 +144,10 @@ async def _run_project_pipeline(
     # Clean stale data from previous runs to prevent false
     # BUILD_FAILED.md / demo/ detection from old sessions
     if project_work_dir.exists():
-        shutil.rmtree(project_work_dir)
+        try:
+            shutil.rmtree(project_work_dir)
+        except OSError as e:
+            logger.warning("Failed to clean stale workspace %s: %s", project_work_dir, e)
     plan_work_dir.mkdir(parents=True, exist_ok=True)
     dev_work_dir.mkdir(parents=True, exist_ok=True)
 
@@ -171,7 +174,7 @@ async def _run_project_pipeline(
         working_dir=str(plan_work_dir),
         allowed_tools=["Read", "Write", "Glob", "Grep"],
         model="sonnet",
-        timeout_seconds=300,
+        timeout_seconds=600,
         max_budget_usd=2.0,
     ))
 
@@ -214,7 +217,7 @@ async def _run_project_pipeline(
         working_dir=str(dev_work_dir),
         allowed_tools=["Bash", "Agent", "Read", "Write", "Glob", "Grep"],
         model="sonnet",
-        timeout_seconds=2400,
+        timeout_seconds=4800,
         max_budget_usd=8.0,
         extra_env=credentials or None,
     ))
@@ -244,13 +247,17 @@ async def _run_project_pipeline(
         working_dir=str(dev_work_dir),
         allowed_tools=["Bash", "Agent", "Read", "Write", "Glob", "Grep"],
         model="sonnet",
-        timeout_seconds=1200,
+        timeout_seconds=2400,
         max_budget_usd=5.0,
         extra_env=credentials or None,
     ))
 
     if review_result.status != SessionStatus.COMPLETED:
         logger.warning("Review session for %s failed: %s", slug, review_result.error)
+        await event_bus.emit(Event(
+            type="session_failed",
+            data={"session_id": f"review-{slug}", "error": review_result.error or "Review session failed"},
+        ))
         # Don't return None yet — check if the project was built before review failed
 
     # ------------------------------------------------------------------
@@ -282,7 +289,7 @@ async def _run_project_pipeline(
             working_dir=str(dev_work_dir),
             allowed_tools=["Bash", "Agent", "Read", "Write", "Glob", "Grep"],
             model="sonnet",
-            timeout_seconds=2400,
+            timeout_seconds=4800,
             max_budget_usd=8.0,
             extra_env=credentials or None,
         ))
@@ -295,7 +302,7 @@ async def _run_project_pipeline(
                 working_dir=str(dev_work_dir),
                 allowed_tools=["Bash", "Agent", "Read", "Write", "Glob", "Grep"],
                 model="sonnet",
-                timeout_seconds=1200,
+                timeout_seconds=2400,
                 max_budget_usd=5.0,
                 extra_env=credentials or None,
             ))

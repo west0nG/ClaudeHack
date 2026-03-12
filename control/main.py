@@ -155,7 +155,7 @@ async def async_main() -> None:
             # Load run metadata
             metadata = _load_run_metadata(workspace_dir)
             if metadata:
-                brief = HackathonBrief.from_dict(metadata["brief"])
+                brief = HackathonBrief.from_dict(metadata.get("brief", {}))
                 theme = metadata["theme"]
             else:
                 # Retroactive: no metadata, infer theme

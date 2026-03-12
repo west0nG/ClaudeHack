@@ -235,7 +235,7 @@ Output ONLY the JSON array, nothing else."""
         working_dir=str(dedup_dir),
         allowed_tools=["Read"],
         model="sonnet",
-        timeout_seconds=60,
+        timeout_seconds=120,
         max_budget_usd=0.5,
         max_retries=0,
     ))
@@ -322,7 +322,7 @@ async def run_stage1(
         working_dir=str(main_dir),
         allowed_tools=["Read", "Write", "WebSearch"],
         model="sonnet",
-        timeout_seconds=180,
+        timeout_seconds=360,
         max_budget_usd=1.0,
     ))
 
@@ -374,7 +374,7 @@ async def run_stage1(
             allowed_tools=["WebSearch", "WebFetch", "Agent", "Read", "Write", "Glob", "Grep"],
             model="sonnet",
             max_budget_usd=5.0,
-            timeout_seconds=900,
+            timeout_seconds=1800,
         )
         research_tasks.append((d, config))
 
@@ -396,19 +396,24 @@ async def run_stage1(
         if not new_cards:
             return result
 
+        # Read existing pool under lock, then release before running dedup session
         async with card_pool_lock:
-            if not card_pool:
-                # First batch — no dedup needed
+            existing_pool = list(card_pool) if card_pool else []
+
+        if not existing_pool:
+            # First batch — no dedup needed
+            async with card_pool_lock:
                 card_pool.extend(new_cards)
-                logger.info("Added %d initial cards to pool from %s", len(new_cards), config.session_id)
-            else:
-                # Compare against existing pool
-                kept = await _stream_dedup_compare(new_cards, card_pool, session_mgr)
+            logger.info("Added %d initial cards to pool from %s", len(new_cards), config.session_id)
+        else:
+            # Compare against existing pool (outside lock to avoid blocking)
+            kept = await _stream_dedup_compare(new_cards, existing_pool, session_mgr)
+            async with card_pool_lock:
                 card_pool.extend(kept)
-                logger.info(
-                    "Added %d/%d cards to pool from %s (after stream dedup)",
-                    len(kept), len(new_cards), config.session_id,
-                )
+            logger.info(
+                "Added %d/%d cards to pool from %s (after stream dedup)",
+                len(kept), len(new_cards), config.session_id,
+            )
 
         return result
 
@@ -461,7 +466,7 @@ async def run_stage1(
             working_dir=str(WORKSPACE_DIR / "dedup"),
             allowed_tools=["Read", "Write", "Glob"],
             model="sonnet",
-            timeout_seconds=300,
+            timeout_seconds=600,
             max_budget_usd=1.0,
         ))
 

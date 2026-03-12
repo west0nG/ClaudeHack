@@ -32,7 +32,7 @@ class SessionConfig:
     allowed_tools: list[str] | None = None
     max_budget_usd: float | None = None
     model: str = "sonnet"
-    timeout_seconds: int = 600
+    timeout_seconds: int = 1200
     max_retries: int = 1
     extra_env: dict[str, str] | None = None
 

@@ -121,7 +121,7 @@ async def _run_pitch_pipeline(
     if demo_link.is_symlink():
         demo_link.unlink()
     if not demo_link.exists():
-        os.symlink(str(project_dir), str(demo_link))
+        os.symlink(str(Path(project_dir).resolve()), str(demo_link))
 
     storyteller_prompt = _render(
         storyteller_template,
@@ -142,7 +142,7 @@ async def _run_pitch_pipeline(
         working_dir=str(storyteller_work_dir),
         allowed_tools=["Read", "Write", "Glob", "Grep", "WebSearch", "WebFetch"],
         model="sonnet",
-        timeout_seconds=600,
+        timeout_seconds=1200,
         max_budget_usd=3.0,
     ))
 
@@ -198,7 +198,7 @@ async def _run_pitch_pipeline(
         working_dir=str(deck_work_dir),
         allowed_tools=["Read", "Write", "Glob", "Grep", "Bash"],
         model="sonnet",
-        timeout_seconds=600,
+        timeout_seconds=1200,
         max_budget_usd=3.0,
     ))
 

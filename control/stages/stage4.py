@@ -330,7 +330,7 @@ async def _publish_project(
             ["gh", "repo", "view", repo_name, "--json", "url", "-q", ".url"],
             cwd=project_dir,
         )
-        repo_url = url_out.strip() if rc2 == 0 and url_out.strip() else repo_name
+        repo_url = url_out.strip() if rc2 == 0 and url_out.strip() else f"https://github.com/{repo_name}"
 
     logger.info("Published %s -> %s", project_name, repo_url)
     await event_bus.emit(Event(
