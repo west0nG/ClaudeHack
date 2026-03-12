@@ -11,11 +11,13 @@ from pathlib import Path
 
 from control.event_bus import EventBus
 from control.models import Event, SessionConfig, SessionResult, SessionStatus
+from control.session_logger import SessionLogger
 
 logger = logging.getLogger(__name__)
 
 # Project root — used to resolve relative working dirs
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+LOGS_DIR = PROJECT_ROOT / "workspace" / "logs"
 
 
 class SessionManager:
@@ -95,6 +97,12 @@ class SessionManager:
                 {"session_id": config.session_id, "model": config.model},
             )
 
+        # Create per-session logger
+        slog = SessionLogger(
+            session_id=config.session_id,
+            log_dir=LOGS_DIR / config.session_id,
+        )
+
         # Allow launching claude CLI from within a Claude Code session
         env = os.environ.copy()
         env.pop("CLAUDECODE", None)
@@ -113,16 +121,20 @@ class SessionManager:
             )
             try:
                 stdout_lines = await asyncio.wait_for(
-                    self._stream_output(proc, config.session_id),
+                    self._stream_output(proc, config.session_id, slog),
                     timeout=config.timeout_seconds,
                 )
             except asyncio.TimeoutError:
                 proc.kill()
                 await proc.wait()
                 duration = time.monotonic() - t0
+                slog.record_timeout(config.timeout_seconds)
+                slog.record_exit("TIMEOUT", error=f"Timeout after {config.timeout_seconds}s", duration=duration)
+                summary_path = slog.write_summary("TIMEOUT", error=f"Timeout after {config.timeout_seconds}s", duration=duration)
+                logger.info("[%s] Timeout — diagnostics: %s", config.session_id, summary_path)
                 await self._emit(
                     "session_failed",
-                    {"session_id": config.session_id, "error": "timeout"},
+                    {"session_id": config.session_id, "error": "timeout", "log": str(summary_path)},
                 )
                 return SessionResult(
                     session_id=config.session_id,
@@ -137,9 +149,12 @@ class SessionManager:
             if proc.returncode != 0:
                 stderr_bytes = await proc.stderr.read() if proc.stderr else b""
                 err_msg = stderr_bytes.decode(errors="replace").strip()
+                slog.record_exit("FAILED", error=err_msg, duration=duration)
+                summary_path = slog.write_summary("FAILED", error=err_msg, duration=duration)
+                logger.info("[%s] Failed — diagnostics: %s", config.session_id, summary_path)
                 await self._emit(
                     "session_failed",
-                    {"session_id": config.session_id, "error": err_msg[:200]},
+                    {"session_id": config.session_id, "error": err_msg[:200], "log": str(summary_path)},
                 )
                 return SessionResult(
                     session_id=config.session_id,
@@ -151,6 +166,9 @@ class SessionManager:
             # Collect output files
             output_files = self._collect_output_files(work_dir)
             full_output = "\n".join(stdout_lines)
+
+            slog.record_exit("COMPLETED", duration=duration)
+            slog.write_summary("COMPLETED", duration=duration)
 
             await self._emit(
                 "session_completed",
@@ -171,6 +189,8 @@ class SessionManager:
 
         except Exception as exc:
             duration = time.monotonic() - t0
+            slog.record_exit("ERROR", error=str(exc), duration=duration)
+            slog.write_summary("ERROR", error=str(exc), duration=duration)
             await self._emit(
                 "session_failed",
                 {"session_id": config.session_id, "error": str(exc)[:200]},
@@ -183,7 +203,8 @@ class SessionManager:
             )
 
     async def _stream_output(
-        self, proc: asyncio.subprocess.Process, session_id: str
+        self, proc: asyncio.subprocess.Process, session_id: str,
+        slog: SessionLogger | None = None,
     ) -> list[str]:
         """Read stream-json lines from stdout, extract progress events."""
         lines: list[str] = []
@@ -196,12 +217,18 @@ class SessionManager:
             lines.append(line)
 
             # Try to parse stream-json event
+            parsed = None
             try:
-                event = json.loads(line)
+                parsed = json.loads(line)
             except json.JSONDecodeError:
-                continue
+                pass
 
-            await self._process_stream_event(session_id, event)
+            # Record to session log (every event, parsed or not)
+            if slog:
+                slog.record_event(line, parsed)
+
+            if parsed:
+                await self._process_stream_event(session_id, parsed)
 
         return lines
 
