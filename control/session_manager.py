@@ -89,7 +89,8 @@ class SessionManager:
         work_dir.mkdir(parents=True, exist_ok=True)
 
         cmd = self._build_command(config)
-        logger.info("[%s] Starting: %s", config.session_id, " ".join(cmd))
+        prompt_size = len(config.prompt.encode("utf-8"))
+        logger.info("[%s] Starting (prompt: %dKB): %s", config.session_id, prompt_size // 1024, " ".join(cmd))
 
         if emit_started:
             await self._emit(
@@ -111,14 +112,21 @@ class SessionManager:
             env.update(config.extra_env)
 
         t0 = time.monotonic()
+        prompt_bytes = config.prompt.encode("utf-8")
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
+                stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(work_dir),
                 env=env,
             )
+            # Feed prompt via stdin and close to signal EOF
+            proc.stdin.write(prompt_bytes)
+            await proc.stdin.drain()
+            proc.stdin.close()
+            await proc.stdin.wait_closed()
             try:
                 stdout_lines = await asyncio.wait_for(
                     self._stream_output(proc, config.session_id, slog),
@@ -287,8 +295,12 @@ class SessionManager:
             )
 
     def _build_command(self, config: SessionConfig) -> list[str]:
-        """Build the claude CLI command."""
-        cmd = ["claude", "-p", config.prompt, "--output-format", "stream-json", "--verbose"]
+        """Build the claude CLI command.
+
+        The prompt is NOT included in the command args — it is piped via stdin
+        to avoid OS argument length limits (prompts can be 50-100KB+).
+        """
+        cmd = ["claude", "-p", "--output-format", "stream-json", "--verbose"]
 
         if config.system_prompt:
             cmd.extend(["--system-prompt", config.system_prompt])

@@ -1,4 +1,22 @@
-What to build
+​Build a rapid prototype that leverages generative AI pipelines to create, simulate, or power next-gen games.
 
-AI native product - interesting, easy to understand, solve actual pain points for people like us, for public. Be interesting, creative, and big
+​Tool Track — World-building & Gaming Tools
 
+​For tools, engines, models, or frameworks that enable others to generate or simulate worlds.
+
+​We’re looking for systems that connect models, simulate change over time, contribute to pipelines and turn generation into interaction.
+
+
+​Core Focus - What We’re Looking For?
+
+​Spatial Understanding
+Represent geometry, structure, and physical relationships in 3D gaming pace.
+
+​Environmental Coherence
+Maintain logical consistency across large generated environments.
+
+​Dynamic Simulation
+Model time, interaction, causality, and state changes.
+
+​Emergent Experiences
+Enable AI-native interactive worlds that evolve beyond scripted behavior.
