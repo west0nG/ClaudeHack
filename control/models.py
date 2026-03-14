@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
+
+
+def slugify_name(name: str, max_len: int = 40, fallback: str = "item") -> str:
+    """Normalize a string into a lowercase-hyphen slug.
+
+    Shared across stages to guarantee consistent slug derivation.
+    """
+    slug = re.sub(r"[^a-z0-9-]", "-", name.lower())
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    return slug[:max_len] or fallback
 
 
 class SessionStatus(str, Enum):

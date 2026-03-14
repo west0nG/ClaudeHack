@@ -1,8 +1,12 @@
 """Persistent credential store and prerequisites parser.
 
-Two-layer credential architecture:
+Three-layer credential architecture:
   Layer 1: Persistent store at project root (credentials.env) — accumulates across runs
-  Layer 2: Per-run credentials at workspace/stage2.5/credentials.env — subset for this run
+  Layer 2: System environment variables (os.environ) — developer's existing shell config
+  Layer 3: Interactive collection (CLI / Dashboard) — only for what's still missing
+
+Includes an alias table so that GOOGLE_API_KEY, GOOGLE_MAPS_API_KEY, etc.
+all resolve to the same underlying credential value.
 """
 
 from __future__ import annotations
@@ -10,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import urllib.error
 import urllib.parse
@@ -39,6 +44,139 @@ _FORMAT_HINTS: dict[str, str] = {
     "SLACK_BOT_TOKEN": "must start with 'xoxb-'",
     "SLACK_SIGNING_SECRET": "must be 32 lowercase hex characters",
 }
+
+
+# ---------------------------------------------------------------------------
+# Credential Alias Table
+# ---------------------------------------------------------------------------
+# Maps variant names → canonical name.  When a project requests any variant,
+# the system looks up the canonical name in the credential store / env.
+# Add new rows as AI-generated names are discovered.
+
+_CANONICAL_ALIASES: dict[str, str] = {
+    # OpenAI
+    "OPENAI_KEY": "OPENAI_API_KEY",
+    "OPEN_AI_KEY": "OPENAI_API_KEY",
+    "OPEN_AI_API_KEY": "OPENAI_API_KEY",
+
+    # Anthropic
+    "ANTHROPIC_KEY": "ANTHROPIC_API_KEY",
+    "CLAUDE_API_KEY": "ANTHROPIC_API_KEY",
+
+    # Google — all variants map to one key
+    "GOOGLE_API_KEY": "GOOGLE_API_KEY",
+    "GOOGLE_MAPS_API_KEY": "GOOGLE_API_KEY",
+    "GOOGLE_MAPS_KEY": "GOOGLE_API_KEY",
+    "GOOGLE_CLOUD_API_KEY": "GOOGLE_API_KEY",
+    "GOOGLE_CLOUD_KEY": "GOOGLE_API_KEY",
+    "GOOGLE_GEMINI_API_KEY": "GOOGLE_API_KEY",
+    "GEMINI_API_KEY": "GOOGLE_API_KEY",
+
+    # GitHub
+    "GITHUB_TOKEN": "GITHUB_TOKEN",
+    "GITHUB_API_TOKEN": "GITHUB_TOKEN",
+    "GITHUB_ACCESS_TOKEN": "GITHUB_TOKEN",
+    "GH_TOKEN": "GITHUB_TOKEN",
+    "GITHUB_PAT": "GITHUB_TOKEN",
+
+    # Slack
+    "SLACK_TOKEN": "SLACK_BOT_TOKEN",
+    "SLACK_API_TOKEN": "SLACK_BOT_TOKEN",
+    "SLACK_APP_TOKEN": "SLACK_BOT_TOKEN",
+    "SLACK_SIGNING_KEY": "SLACK_SIGNING_SECRET",
+
+    # Stripe
+    "STRIPE_API_KEY": "STRIPE_SECRET_KEY",
+    "STRIPE_KEY": "STRIPE_SECRET_KEY",
+
+    # Supabase
+    "SUPABASE_KEY": "SUPABASE_ANON_KEY",
+    "SUPABASE_API_KEY": "SUPABASE_ANON_KEY",
+
+    # Firebase
+    "FIREBASE_KEY": "FIREBASE_API_KEY",
+    "FIREBASE_CONFIG": "FIREBASE_API_KEY",
+
+    # AWS
+    "AWS_KEY": "AWS_ACCESS_KEY_ID",
+    "AWS_ACCESS_KEY": "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET": "AWS_SECRET_ACCESS_KEY",
+    "AWS_SECRET_KEY": "AWS_SECRET_ACCESS_KEY",
+
+    # Notion
+    "NOTION_API_KEY": "NOTION_TOKEN",
+    "NOTION_KEY": "NOTION_TOKEN",
+    "NOTION_INTEGRATION_TOKEN": "NOTION_TOKEN",
+
+    # Twilio
+    "TWILIO_KEY": "TWILIO_AUTH_TOKEN",
+    "TWILIO_API_KEY": "TWILIO_AUTH_TOKEN",
+
+    # SendGrid
+    "SENDGRID_KEY": "SENDGRID_API_KEY",
+
+    # Resend
+    "RESEND_KEY": "RESEND_API_KEY",
+
+    # Replicate
+    "REPLICATE_KEY": "REPLICATE_API_TOKEN",
+    "REPLICATE_API_KEY": "REPLICATE_API_TOKEN",
+
+    # ElevenLabs
+    "ELEVENLABS_KEY": "ELEVENLABS_API_KEY",
+    "ELEVEN_LABS_API_KEY": "ELEVENLABS_API_KEY",
+    "ELEVEN_LABS_KEY": "ELEVENLABS_API_KEY",
+
+    # Pinecone
+    "PINECONE_KEY": "PINECONE_API_KEY",
+
+    # Hugging Face
+    "HF_TOKEN": "HUGGINGFACE_API_KEY",
+    "HF_API_KEY": "HUGGINGFACE_API_KEY",
+    "HUGGINGFACE_TOKEN": "HUGGINGFACE_API_KEY",
+    "HUGGING_FACE_API_KEY": "HUGGINGFACE_API_KEY",
+}
+
+# Build reverse index: canonical → set of all variant names (including itself)
+_CANONICAL_TO_VARIANTS: dict[str, set[str]] = {}
+for _variant, _canonical in _CANONICAL_ALIASES.items():
+    _CANONICAL_TO_VARIANTS.setdefault(_canonical, set()).add(_variant)
+    _CANONICAL_TO_VARIANTS[_canonical].add(_canonical)
+
+
+def resolve_credential(
+    requested_name: str,
+    available: dict[str, str],
+) -> str:
+    """Look up a credential value, checking all known aliases.
+
+    If ``requested_name`` is not directly in ``available``, checks whether any
+    alias of the same canonical key is present.
+
+    Returns the value if found, or empty string.
+    """
+    # Direct hit
+    val = available.get(requested_name, "")
+    if val:
+        return val
+
+    # Resolve via alias table
+    canonical = _CANONICAL_ALIASES.get(requested_name)
+    if canonical is None:
+        return ""
+
+    # Check canonical name itself
+    val = available.get(canonical, "")
+    if val:
+        return val
+
+    # Check all sibling variants
+    for variant in _CANONICAL_TO_VARIANTS.get(canonical, ()):
+        val = available.get(variant, "")
+        if val:
+            return val
+
+    return ""
 
 
 def _format_check(env_var: str, value: str) -> str | None:
@@ -198,6 +336,61 @@ def load_persistent(path: Path) -> dict[str, str]:
     return creds
 
 
+def load_all_credentials(
+    persistent_path: Path,
+    needed_vars: set[str] | None = None,
+) -> dict[str, str]:
+    """Load credentials from persistent store + alias resolution + system environment.
+
+    Lookup order for each needed var (first non-empty value wins):
+      1. Persistent store (credentials.env) — exact name
+      2. Persistent store — alias variants (e.g. GOOGLE_MAPS_API_KEY → GOOGLE_API_KEY)
+      3. System environment — exact name
+      4. System environment — alias variants
+
+    Args:
+        persistent_path: Path to persistent credentials.env file.
+        needed_vars: If provided, check aliases and os.environ for these variable names.
+            When None, only returns persistent store values (no env scan / alias resolution).
+
+    Returns:
+        Merged dict of credential name → value.
+        Keys are the *requested* names (not canonical), so downstream code
+        sees the exact variable name it asked for.
+    """
+    creds = load_persistent(persistent_path)
+
+    if needed_vars is None:
+        return creds
+
+    for var in needed_vars:
+        if var in creds and creds[var]:
+            continue
+
+        # Try alias resolution against persistent store
+        value = resolve_credential(var, creds)
+        if value:
+            logger.info("Credential %s: resolved via alias from persistent store", var)
+            creds[var] = value
+            continue
+
+        # Try exact name in system environment
+        env_value = os.environ.get(var, "")
+        if env_value:
+            logger.info("Credential %s: found in system environment", var)
+            creds[var] = env_value
+            continue
+
+        # Try alias resolution against system environment
+        env_value = resolve_credential(var, dict(os.environ))
+        if env_value:
+            canonical = _CANONICAL_ALIASES.get(var, var)
+            logger.info("Credential %s: resolved via alias from system environment (canonical: %s)", var, canonical)
+            creds[var] = env_value
+
+    return creds
+
+
 def save_persistent(path: Path, new_creds: dict[str, str]) -> None:
     """Append new credentials to the persistent store.
 
@@ -343,7 +536,9 @@ def diff_credentials(
                 # collect them, and they're optional anyway).
                 continue
 
-            if env_var in have and have[env_var]:
+            # Check with alias resolution (e.g. GOOGLE_MAPS_API_KEY → GOOGLE_API_KEY)
+            value = resolve_credential(env_var, have)
+            if value:
                 result["satisfied"].append({**dep, "category": category})
             elif category == "carrier":
                 result["missing_carrier"].append(dep)

@@ -13,7 +13,7 @@ import shutil
 from pathlib import Path
 
 from control.event_bus import EventBus
-from control.models import Event, SessionConfig, SessionStatus
+from control.models import Event, SessionConfig, SessionStatus, slugify_name
 from control.session_manager import PROJECT_ROOT, SessionManager
 
 logger = logging.getLogger(__name__)
@@ -49,10 +49,7 @@ def _render(template: str, **kwargs: str) -> str:
 
 def _slugify_prd_dir(prd_dir: Path) -> str:
     """Derive a short slug from a PRD directory path."""
-    name = prd_dir.name  # e.g. "freelancer-burnout"
-    slug = re.sub(r"[^a-z0-9-]", "-", name.lower())
-    slug = re.sub(r"-+", "-", slug).strip("-")
-    return slug[:40] or "project"
+    return slugify_name(prd_dir.name, fallback="project")
 
 
 def _check_project_success(work_dir: Path) -> dict:
@@ -92,30 +89,6 @@ def _load_env_plan(slug: str) -> str:
     return ""
 
 
-def _load_credentials() -> dict[str, str]:
-    """Load credentials from workspace/stage2.5/credentials.env.
-
-    Returns a dict of env var name → value. Returns empty dict if no file.
-    Parses simple KEY=VALUE format, skipping comments and blank lines.
-    """
-    creds_path = STAGE2_5_DIR / "credentials.env"
-    if not creds_path.exists():
-        return {}
-
-    creds: dict[str, str] = {}
-    for line in creds_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" in line:
-            key, _, value = line.partition("=")
-            key = key.strip()
-            value = value.strip()
-            if key:
-                creds[key] = value
-    return creds
-
-
 async def _run_project_pipeline(
     prd_dir: Path,
     slug: str,
@@ -129,6 +102,25 @@ async def _run_project_pipeline(
 
     Returns the demo/ directory path on success, or None if failed.
     """
+    # Skip if project already succeeded (resume scenario)
+    project_work_dir = WORKSPACE_DIR / slug
+    dev_work_dir = project_work_dir / "dev"
+    existing_demo = dev_work_dir / "demo" / "package.json"
+    existing_fail = dev_work_dir / "BUILD_FAILED.md"
+    if existing_demo.exists() and not existing_fail.exists():
+        logger.info("Project %s already succeeded, skipping", slug)
+        demo_dir = dev_work_dir / "demo"
+        await event_bus.emit(Event(
+            type="dev_completed",
+            data={
+                "session_id": f"dev-{slug}",
+                "project_dir": str(demo_dir),
+                "has_readme": (demo_dir / "README.md").exists(),
+                "skipped": True,
+            },
+        ))
+        return demo_dir
+
     # Read the 3 PRD documents
     concept_content = (prd_dir / "concept.md").read_text(encoding="utf-8")
     logic_content = (prd_dir / "logic.md").read_text(encoding="utf-8")
@@ -138,19 +130,31 @@ async def _run_project_pipeline(
     env_plan_content = _load_env_plan(slug)
 
     # Working directories: plan gets its own, dev and review share one
-    project_work_dir = WORKSPACE_DIR / slug
     plan_work_dir = project_work_dir / "plan"
-    dev_work_dir = project_work_dir / "dev"
 
-    # Clean stale data from previous runs to prevent false
-    # BUILD_FAILED.md / demo/ detection from old sessions
-    if project_work_dir.exists():
-        try:
-            shutil.rmtree(project_work_dir)
-        except OSError as e:
-            logger.warning("Failed to clean stale workspace %s: %s", project_work_dir, e)
-    plan_work_dir.mkdir(parents=True, exist_ok=True)
-    dev_work_dir.mkdir(parents=True, exist_ok=True)
+    # Check if plan already completed (resume scenario)
+    existing_plan = plan_work_dir / "dev-plan.md"
+    skip_plan = existing_plan.exists()
+
+    if skip_plan:
+        logger.info("Plan for %s already exists, skipping plan session", slug)
+        # Only clean dev working dir (remove stale BUILD_FAILED.md / demo/)
+        if dev_work_dir.exists():
+            try:
+                shutil.rmtree(dev_work_dir)
+            except OSError as e:
+                logger.warning("Failed to clean dev workspace %s: %s", dev_work_dir, e)
+        dev_work_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        # Clean stale data from previous runs to prevent false
+        # BUILD_FAILED.md / demo/ detection from old sessions
+        if project_work_dir.exists():
+            try:
+                shutil.rmtree(project_work_dir)
+            except OSError as e:
+                logger.warning("Failed to clean stale workspace %s: %s", project_work_dir, e)
+        plan_work_dir.mkdir(parents=True, exist_ok=True)
+        dev_work_dir.mkdir(parents=True, exist_ok=True)
 
     # Load prompt templates
     plan_template = _read_prompt("plan.md")
@@ -158,34 +162,35 @@ async def _run_project_pipeline(
     review_template = _read_prompt("review.md")
 
     # ------------------------------------------------------------------
-    # Session A: Plan
+    # Session A: Plan (skip if dev-plan.md already exists)
     # ------------------------------------------------------------------
-    plan_prompt = _render(
-        plan_template,
-        theme=theme,
-        concept_content=concept_content,
-        logic_content=logic_content,
-        technical_content=technical_content,
-        env_plan_content=env_plan_content,
-    )
+    if not skip_plan:
+        plan_prompt = _render(
+            plan_template,
+            theme=theme,
+            concept_content=concept_content,
+            logic_content=logic_content,
+            technical_content=technical_content,
+            env_plan_content=env_plan_content,
+        )
 
-    plan_result = await session_mgr.run_session_bounded(SessionConfig(
-        session_id=f"plan-{slug}",
-        prompt=plan_prompt,
-        working_dir=str(plan_work_dir),
-        allowed_tools=["Read", "Write", "Glob", "Grep"],
-        model=model,
-        timeout_seconds=600,
-        max_budget_usd=2.0,
-    ))
-
-    if plan_result.status != SessionStatus.COMPLETED:
-        logger.warning("Plan session for %s failed: %s", slug, plan_result.error)
-        await event_bus.emit(Event(
-            type="dev_failed",
-            data={"session_id": f"plan-{slug}", "error": plan_result.error or "unknown"},
+        plan_result = await session_mgr.run_session_bounded(SessionConfig(
+            session_id=f"plan-{slug}",
+            prompt=plan_prompt,
+            working_dir=str(plan_work_dir),
+            allowed_tools=["Read", "Write", "Glob", "Grep"],
+            model=model,
+            timeout_seconds=600,
+            max_budget_usd=2.0,
         ))
-        return None
+
+        if plan_result.status != SessionStatus.COMPLETED:
+            logger.warning("Plan session for %s failed: %s", slug, plan_result.error)
+            await event_bus.emit(Event(
+                type="dev_failed",
+                data={"session_id": f"plan-{slug}", "error": plan_result.error or "unknown"},
+            ))
+            return None
 
     # Read dev-plan.md
     dev_plan_file = plan_work_dir / "dev-plan.md"
@@ -355,6 +360,8 @@ async def run_stage3(
     session_mgr: SessionManager,
     event_bus: EventBus,
     model: str = "sonnet",
+    credentials: dict[str, str] | None = None,
+    project_needed_vars: dict[str, set[str]] | None = None,
 ) -> list[Path]:
     """Execute Stage 3: Demo Development.
 
@@ -363,6 +370,10 @@ async def run_stage3(
         theme: Hackathon theme string.
         session_mgr: Session manager for running Claude CLI sessions.
         event_bus: Event bus for publishing progress events.
+        credentials: Merged credentials from ConfigGate (passed directly, not re-read from file).
+        project_needed_vars: Per-project env var names from ConfigGate.
+            Maps slug -> set of env var names the project actually needs.
+            When provided, each project's .env only receives its own keys.
 
     Returns:
         List of paths to successful demo/ project directories.
@@ -374,20 +385,27 @@ async def run_stage3(
 
     WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Load credentials from ConfigGate (shared across all projects)
-    credentials = _load_credentials()
     if credentials:
-        logger.info("Stage 3: Loaded %d credentials from ConfigGate", len(credentials))
+        logger.info("Stage 3: Received %d credentials from ConfigGate", len(credentials))
     else:
-        logger.info("Stage 3: No credentials found (ConfigGate skipped or no credentials.env)")
+        logger.info("Stage 3: No credentials provided")
 
     # Launch project pipelines in parallel (SessionManager semaphore bounds concurrency)
     tasks = []
     for prd_dir in prd_dirs:
         slug = _slugify_prd_dir(prd_dir)
+
+        # Filter credentials to only keys this project needs
+        if credentials and project_needed_vars and slug in project_needed_vars:
+            needed = project_needed_vars[slug]
+            project_creds = {k: v for k, v in credentials.items() if k in needed}
+        else:
+            # No per-project info available — pass all credentials (backward compat)
+            project_creds = credentials
+
         tasks.append(_run_project_pipeline(
             prd_dir, slug, theme, session_mgr, event_bus,
-            credentials=credentials if credentials else None,
+            credentials=project_creds if project_creds else None,
             model=model,
         ))
 

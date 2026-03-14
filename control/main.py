@@ -21,8 +21,10 @@ from pathlib import Path
 
 import shutil
 
+from control.credential_barrier import CredentialBarrier, PERSISTENT_CREDS_PATH
+from control.credential_store import load_all_credentials, load_persistent
 from control.event_bus import EventBus
-from control.models import Event, HackathonBrief
+from control.models import Event, HackathonBrief, slugify_name
 from control.review_gate import ReviewGate
 from control.session_manager import PROJECT_ROOT, SessionManager
 from control.stages.stage0 import run_stage0
@@ -32,6 +34,7 @@ from control.stages.stage2_5 import run_config_gate
 from control.stages.stage3 import run_stage3
 from control.stages.stage4 import run_stage4
 from control.stages.stage5 import run_stage5, WORKSPACE_DIR as STAGE5_WORKSPACE
+from control.streaming import run_streaming_pipeline
 from control.ws_server import WebSocketServer
 
 logging.basicConfig(
@@ -236,13 +239,29 @@ async def async_main() -> None:
                 return
 
             if next_stage <= 25:
-                approved_dirs, _ = await run_config_gate(
+                approved_dirs, merged_creds, per_project_vars = await run_config_gate(
                     prd_dirs=prd_dirs, event_bus=event_bus,
                     skip=args.skip_config, no_dashboard=args.no_dashboard,
                     ws_server=ws_server,
                 )
             else:
                 approved_dirs = prd_dirs
+                # Rebuild per-project needed vars from environment-plan dirs
+                per_project_vars = _rebuild_project_needed_vars(
+                    workspace_dir / "stage2.5", prd_dirs,
+                )
+                # Collect all needed var names for env lookup
+                all_needed = set()
+                for vs in per_project_vars.values():
+                    all_needed |= vs
+                # Reload credentials from per-run file + system environment
+                run_creds_path = workspace_dir / "stage2.5" / "credentials.env"
+                merged_creds = load_all_credentials(run_creds_path, needed_vars=all_needed)
+                if merged_creds:
+                    logger.info(
+                        "Resume: loaded %d credentials (store + env)",
+                        len(merged_creds),
+                    )
 
             if not approved_dirs and next_stage <= 25:
                 logger.info("ConfigGate blocked all projects — pipeline ending")
@@ -253,6 +272,8 @@ async def async_main() -> None:
                     prd_dirs=approved_dirs, theme=theme,
                     session_mgr=session_mgr, event_bus=event_bus,
                     model=model,
+                    credentials=merged_creds or None,
+                    project_needed_vars=per_project_vars or None,
                 )
 
             if project_dirs:
@@ -300,7 +321,7 @@ async def async_main() -> None:
             logger.info("Running Stage 3 directly on: %s (theme: %s)", prd_dir.name, theme)
 
             # ConfigGate: collect credentials before Stage 3
-            approved_dirs, _ = await run_config_gate(
+            approved_dirs, merged_creds, per_project_vars = await run_config_gate(
                 prd_dirs=[prd_dir],
                 event_bus=event_bus,
                 skip=args.skip_config,
@@ -318,6 +339,8 @@ async def async_main() -> None:
                 session_mgr=session_mgr,
                 event_bus=event_bus,
                 model=args.model,
+                credentials=merged_creds or None,
+                project_needed_vars=per_project_vars or None,
             )
 
             logger.info("=" * 60)
@@ -467,43 +490,30 @@ async def async_main() -> None:
             logger.info("=" * 60)
             return
 
-        # Stage 2: PRD generation (parallel across cards)
-        prd_dirs = await run_stage2(
-            idea_cards=approved_cards,
-            theme=brief.theme,
-            session_mgr=session_mgr,
-            event_bus=event_bus,
-            model=args.model,
-        )
-
-        if not prd_dirs:
-            logger.info("No PRDs produced — pipeline ending after Stage 2")
-            logger.info("=" * 60)
-            return
-
-        logger.info("Stage 2 produced %d PRD directories", len(prd_dirs))
-
-        # Stage 2.5: ConfigGate — collect credentials, generate env plans
-        approved_dirs, _ = await run_config_gate(
-            prd_dirs=prd_dirs,
+        # Streaming pipeline: each card flows independently through
+        # Stage 2 → ConfigCheck → Stage 3 → Stage 5 → Stage 4.
+        # No stage-level synchronization barriers.
+        persistent_creds = load_all_credentials(PERSISTENT_CREDS_PATH)
+        barrier = CredentialBarrier(
+            persistent_creds=persistent_creds,
+            total_projects=len(approved_cards),
             event_bus=event_bus,
             skip=args.skip_config,
             no_dashboard=args.no_dashboard,
             ws_server=ws_server,
         )
 
-        if not approved_dirs:
-            logger.info("ConfigGate blocked all projects — pipeline ending")
-            logger.info("=" * 60)
-            return
-
-        # Stage 3: Demo development (parallel across projects)
-        project_dirs = await run_stage3(
-            prd_dirs=approved_dirs,
+        project_dirs = await run_streaming_pipeline(
+            idea_cards=approved_cards,
             theme=brief.theme,
             session_mgr=session_mgr,
             event_bus=event_bus,
+            barrier=barrier,
             model=args.model,
+            skip_pitch=args.skip_pitch,
+            skip_publish=args.skip_publish,
+            private=args.private,
+            publish_mode=args.publish_mode,
         )
 
         logger.info("=" * 60)
@@ -511,33 +521,6 @@ async def async_main() -> None:
         for d in project_dirs:
             logger.info("  - %s", d)
         logger.info("=" * 60)
-
-        # Stage 5 → copy into demo/ → Stage 4
-        if project_dirs:
-            # Stage 5: Pitch Deck generation
-            if not args.skip_pitch:
-                pitch_dirs = await run_stage5(
-                    project_dirs, theme=brief.theme, session_mgr=session_mgr,
-                    event_bus=event_bus, model=args.model,
-                )
-                copied = _copy_pitch_to_projects(project_dirs)
-                logger.info("=" * 60)
-                logger.info("Generated %d pitch decks, copied to %d projects:", len(pitch_dirs), copied)
-                for d in pitch_dirs:
-                    logger.info("  - %s", d)
-                logger.info("=" * 60)
-
-            # Stage 4: Publish to GitHub (pitch files already in demo/)
-            if not args.skip_publish:
-                repo_urls = await run_stage4(
-                    project_dirs, event_bus, private=args.private,
-                    publish_mode=args.publish_mode,
-                )
-                logger.info("=" * 60)
-                logger.info("Published %d repos:", len(repo_urls))
-                for url in repo_urls:
-                    logger.info("  - %s", url)
-                logger.info("=" * 60)
 
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
@@ -611,15 +594,30 @@ def _detect_last_completed_stage(workspace: Path) -> int:
     if stage5_output.is_dir() and any(stage5_output.iterdir()):
         return 5
 
-    # Stage 3 completed? (at least one demo/package.json)
+    # Stage 3 completed? Check if ALL PRD output dirs have stage3 demos.
+    # If only some succeeded, return 25 so stage3 re-runs (with skip logic for done ones).
     stage3 = workspace / "stage3"
-    if stage3.is_dir():
+    stage2_output = workspace / "stage2" / "output"
+    if stage3.is_dir() and stage2_output.is_dir():
+        prd_slugs = {d.name for d in stage2_output.iterdir() if d.is_dir() and (d / "concept.md").exists()}
+        succeeded = set()
         for slug_dir in stage3.iterdir():
             if not slug_dir.is_dir():
                 continue
             demo_pkg = slug_dir / "dev" / "demo" / "package.json"
             if demo_pkg.exists():
+                succeeded.add(slug_dir.name)
+        if succeeded:
+            if succeeded >= prd_slugs:
+                # All PRD projects have demos — stage 3 fully complete
                 return 3
+            else:
+                # Partial completion — re-enter stage 3 (skip logic handles done ones)
+                logger.info(
+                    "Stage 3 partially complete: %d/%d projects succeeded",
+                    len(succeeded), len(prd_slugs),
+                )
+                return 25
 
     # Stage 2.5 completed? (credentials.env in stage2.5/)
     stage2_5 = workspace / "stage2.5"
@@ -679,6 +677,29 @@ def _copy_pitch_to_projects(project_dirs: list[Path]) -> int:
         copied += 1
         logger.info("Copied pitch files into %s", project_dir)
     return copied
+
+
+def _rebuild_project_needed_vars(
+    stage2_5_dir: Path, prd_dirs: list[Path],
+) -> dict[str, set[str]]:
+    """Rebuild per-project needed vars from environment-plan.md files on resume.
+
+    Parses the env var names from the `backtick` patterns in each plan file.
+    Returns slug -> set of env var names.
+    """
+    import re
+    result: dict[str, set[str]] = {}
+    for prd_dir in prd_dirs:
+        slug = slugify_name(prd_dir.name, fallback="project")
+        plan_path = stage2_5_dir / slug / "environment-plan.md"
+        if not plan_path.exists():
+            continue
+        content = plan_path.read_text(encoding="utf-8")
+        # Extract env var names from `VAR_NAME` patterns in the plan
+        env_vars = set(re.findall(r"`([A-Z][A-Z0-9_]+)`", content))
+        if env_vars:
+            result[slug] = env_vars
+    return result
 
 
 def _archive_workspace() -> Path | None:

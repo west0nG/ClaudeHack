@@ -21,13 +21,14 @@ from pathlib import Path
 from control.credential_store import (
     diff_credentials,
     generate_env_plan,
+    load_all_credentials,
     load_persistent,
     parse_prerequisites,
     save_persistent,
     validate_credential,
 )
 from control.event_bus import EventBus
-from control.models import Event
+from control.models import Event, slugify_name
 from control.session_manager import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ async def run_config_gate(
     skip: bool = False,
     no_dashboard: bool = True,
     ws_server: "WebSocketServer | None" = None,
-) -> tuple[list[Path], dict[str, str]]:
+) -> tuple[list[Path], dict[str, str], dict[str, set[str]]]:
     """Run ConfigGate: parse prerequisites, collect credentials, generate env plans.
 
     Args:
@@ -58,9 +59,10 @@ async def run_config_gate(
         ws_server: WebSocket server for dashboard interaction (None = CLI mode).
 
     Returns:
-        Tuple of (approved_prd_dirs, merged_credentials).
+        Tuple of (approved_prd_dirs, merged_credentials, project_needed_vars).
         approved_prd_dirs excludes projects blocked by missing carrier deps.
         merged_credentials contains all credentials (persistent + newly collected).
+        project_needed_vars maps slug -> set of env var names the project needs.
     """
     creds_path = persistent_creds_path or PERSISTENT_CREDS_PATH
 
@@ -72,6 +74,8 @@ async def run_config_gate(
     # Step 1: Parse all technical.md prerequisites
     all_prerequisites: dict[str, dict] = {}  # slug -> parsed prerequisites
     all_needed_vars: set[str] = set()
+    # Per-project env var names (slug -> set of var names)
+    project_needed_vars: dict[str, set[str]] = {}
 
     for prd_dir in prd_dirs:
         technical_path = prd_dir / "technical.md"
@@ -81,15 +85,18 @@ async def run_config_gate(
 
         technical_content = technical_path.read_text(encoding="utf-8")
         prereqs = parse_prerequisites(technical_content)
-        slug = prd_dir.name
+        slug = slugify_name(prd_dir.name, fallback="project")
         all_prerequisites[slug] = prereqs
 
-        # Collect all unique env var names
+        # Collect env var names (global + per-project)
+        project_vars: set[str] = set()
         for category in ("carrier", "functional"):
             for dep in prereqs.get(category, []):
                 env_var = dep.get("env_var", "")
                 if env_var:
                     all_needed_vars.add(env_var)
+                    project_vars.add(env_var)
+        project_needed_vars[slug] = project_vars
 
     if not all_prerequisites:
         logger.info("ConfigGate: no prerequisites found in any project")
@@ -97,7 +104,7 @@ async def run_config_gate(
             type="stage_completed",
             data={"stage": "2.5-config", "projects": len(prd_dirs), "skipped": True},
         ))
-        return prd_dirs, {}
+        return prd_dirs, {}, project_needed_vars
 
     logger.info(
         "ConfigGate: found prerequisites in %d projects, %d unique env vars needed",
@@ -105,13 +112,13 @@ async def run_config_gate(
         len(all_needed_vars),
     )
 
-    # Step 2: Diff against persistent store
-    persistent_creds = load_persistent(creds_path)
+    # Step 2: Diff against persistent store + system environment
+    persistent_creds = load_all_credentials(creds_path, needed_vars=all_needed_vars)
     already_have = {k for k in all_needed_vars if k in persistent_creds and persistent_creds[k]}
     still_need = all_needed_vars - already_have
 
     logger.info(
-        "ConfigGate: %d credentials already in store, %d still needed",
+        "ConfigGate: %d credentials already available (store + env), %d still needed",
         len(already_have),
         len(still_need),
     )
@@ -171,7 +178,7 @@ async def run_config_gate(
     blocked_count = 0
 
     for prd_dir in prd_dirs:
-        slug = prd_dir.name
+        slug = slugify_name(prd_dir.name, fallback="project")
         prereqs = all_prerequisites.get(slug)
 
         if prereqs is None:
@@ -222,7 +229,7 @@ async def run_config_gate(
         },
     ))
 
-    return approved_dirs, merged_creds
+    return approved_dirs, merged_creds, project_needed_vars
 
 
 # ---------------------------------------------------------------------------
