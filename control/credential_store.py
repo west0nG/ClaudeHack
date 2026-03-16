@@ -54,16 +54,24 @@ _FORMAT_HINTS: dict[str, str] = {
 # Add new rows as AI-generated names are discovered.
 
 _CANONICAL_ALIASES: dict[str, str] = {
+    # -----------------------------------------------------------------------
+    # AI / LLM Services
+    # -----------------------------------------------------------------------
+
     # OpenAI
     "OPENAI_KEY": "OPENAI_API_KEY",
     "OPEN_AI_KEY": "OPENAI_API_KEY",
     "OPEN_AI_API_KEY": "OPENAI_API_KEY",
+    "OPENAI_SECRET_KEY": "OPENAI_API_KEY",
+    "OPENAI_ORG_ID": "OPENAI_ORGANIZATION",
+    "OPENAI_ORG": "OPENAI_ORGANIZATION",
 
     # Anthropic
     "ANTHROPIC_KEY": "ANTHROPIC_API_KEY",
     "CLAUDE_API_KEY": "ANTHROPIC_API_KEY",
+    "CLAUDE_KEY": "ANTHROPIC_API_KEY",
 
-    # Google — all variants map to one key
+    # Google — Gemini / Vertex / Maps / Cloud
     "GOOGLE_API_KEY": "GOOGLE_API_KEY",
     "GOOGLE_MAPS_API_KEY": "GOOGLE_API_KEY",
     "GOOGLE_MAPS_KEY": "GOOGLE_API_KEY",
@@ -71,6 +79,139 @@ _CANONICAL_ALIASES: dict[str, str] = {
     "GOOGLE_CLOUD_KEY": "GOOGLE_API_KEY",
     "GOOGLE_GEMINI_API_KEY": "GOOGLE_API_KEY",
     "GEMINI_API_KEY": "GOOGLE_API_KEY",
+    "GOOGLE_APPLICATION_CREDENTIALS_JSON": "GOOGLE_APPLICATION_CREDENTIALS",
+    "GCP_CREDENTIALS": "GOOGLE_APPLICATION_CREDENTIALS",
+    "GCP_SERVICE_ACCOUNT": "GOOGLE_APPLICATION_CREDENTIALS",
+    "GCP_PROJECT": "GOOGLE_CLOUD_PROJECT",
+    "GCLOUD_PROJECT": "GOOGLE_CLOUD_PROJECT",
+    "GOOGLE_PROJECT_ID": "GOOGLE_CLOUD_PROJECT",
+
+    # Azure OpenAI
+    "AZURE_OPENAI_KEY": "AZURE_OPENAI_API_KEY",
+    "AZURE_API_KEY": "AZURE_OPENAI_API_KEY",
+    "AZURE_OPENAI_ENDPOINT_URL": "AZURE_OPENAI_ENDPOINT",
+    "AZURE_OPENAI_BASE_URL": "AZURE_OPENAI_ENDPOINT",
+
+    # Cohere
+    "COHERE_KEY": "COHERE_API_KEY",
+    "CO_API_KEY": "COHERE_API_KEY",
+
+    # Mistral
+    "MISTRAL_KEY": "MISTRAL_API_KEY",
+
+    # Groq
+    "GROQ_KEY": "GROQ_API_KEY",
+
+    # Together AI
+    "TOGETHER_KEY": "TOGETHER_API_KEY",
+    "TOGETHERAI_API_KEY": "TOGETHER_API_KEY",
+    "TOGETHER_AI_KEY": "TOGETHER_API_KEY",
+
+    # Perplexity
+    "PERPLEXITY_KEY": "PERPLEXITY_API_KEY",
+    "PPLX_API_KEY": "PERPLEXITY_API_KEY",
+
+    # Fireworks AI
+    "FIREWORKS_KEY": "FIREWORKS_API_KEY",
+    "FIREWORKS_AI_KEY": "FIREWORKS_API_KEY",
+
+    # DeepSeek
+    "DEEPSEEK_KEY": "DEEPSEEK_API_KEY",
+
+    # Hugging Face
+    "HF_TOKEN": "HUGGINGFACE_API_KEY",
+    "HF_API_KEY": "HUGGINGFACE_API_KEY",
+    "HUGGINGFACE_TOKEN": "HUGGINGFACE_API_KEY",
+    "HUGGING_FACE_API_KEY": "HUGGINGFACE_API_KEY",
+    "HF_API_TOKEN": "HUGGINGFACE_API_KEY",
+
+    # Replicate
+    "REPLICATE_KEY": "REPLICATE_API_TOKEN",
+    "REPLICATE_API_KEY": "REPLICATE_API_TOKEN",
+    "REPLICATE_TOKEN": "REPLICATE_API_TOKEN",
+
+    # Stability AI
+    "STABILITY_KEY": "STABILITY_API_KEY",
+    "STABILITY_AI_KEY": "STABILITY_API_KEY",
+
+    # ElevenLabs
+    "ELEVENLABS_KEY": "ELEVENLABS_API_KEY",
+    "ELEVEN_LABS_API_KEY": "ELEVENLABS_API_KEY",
+    "ELEVEN_LABS_KEY": "ELEVENLABS_API_KEY",
+
+    # Voyage AI (embeddings)
+    "VOYAGE_KEY": "VOYAGE_API_KEY",
+
+    # -----------------------------------------------------------------------
+    # Vector Databases / Search
+    # -----------------------------------------------------------------------
+
+    # Pinecone
+    "PINECONE_KEY": "PINECONE_API_KEY",
+    "PINECONE_TOKEN": "PINECONE_API_KEY",
+
+    # Weaviate
+    "WEAVIATE_KEY": "WEAVIATE_API_KEY",
+    "WEAVIATE_TOKEN": "WEAVIATE_API_KEY",
+
+    # Qdrant
+    "QDRANT_KEY": "QDRANT_API_KEY",
+
+    # ChromaDB (cloud)
+    "CHROMA_KEY": "CHROMA_API_KEY",
+    "CHROMA_TOKEN": "CHROMA_API_KEY",
+
+    # Algolia
+    "ALGOLIA_KEY": "ALGOLIA_API_KEY",
+    "ALGOLIA_APP": "ALGOLIA_APP_ID",
+    "ALGOLIA_APPLICATION_ID": "ALGOLIA_APP_ID",
+
+    # -----------------------------------------------------------------------
+    # Cloud Platforms
+    # -----------------------------------------------------------------------
+
+    # AWS
+    "AWS_KEY": "AWS_ACCESS_KEY_ID",
+    "AWS_ACCESS_KEY": "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET": "AWS_SECRET_ACCESS_KEY",
+    "AWS_SECRET_KEY": "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION": "AWS_SESSION_TOKEN",
+    "AWS_REGION_NAME": "AWS_DEFAULT_REGION",
+    "AWS_REGION": "AWS_DEFAULT_REGION",
+
+    # Azure (general)
+    "AZURE_KEY": "AZURE_SUBSCRIPTION_KEY",
+    "AZURE_API": "AZURE_SUBSCRIPTION_KEY",
+    "AZURE_TENANT": "AZURE_TENANT_ID",
+    "AZURE_CLIENT": "AZURE_CLIENT_ID",
+    "AZURE_SECRET": "AZURE_CLIENT_SECRET",
+
+    # Cloudflare
+    "CF_API_KEY": "CLOUDFLARE_API_TOKEN",
+    "CLOUDFLARE_KEY": "CLOUDFLARE_API_TOKEN",
+    "CLOUDFLARE_TOKEN": "CLOUDFLARE_API_TOKEN",
+    "CF_TOKEN": "CLOUDFLARE_API_TOKEN",
+    "CF_ACCOUNT_ID": "CLOUDFLARE_ACCOUNT_ID",
+
+    # Vercel
+    "VERCEL_KEY": "VERCEL_TOKEN",
+    "VERCEL_API_TOKEN": "VERCEL_TOKEN",
+
+    # Netlify
+    "NETLIFY_KEY": "NETLIFY_AUTH_TOKEN",
+    "NETLIFY_TOKEN": "NETLIFY_AUTH_TOKEN",
+
+    # Railway
+    "RAILWAY_KEY": "RAILWAY_TOKEN",
+    "RAILWAY_API_TOKEN": "RAILWAY_TOKEN",
+
+    # Fly.io
+    "FLY_TOKEN": "FLY_API_TOKEN",
+    "FLY_KEY": "FLY_API_TOKEN",
+
+    # -----------------------------------------------------------------------
+    # Code / Version Control
+    # -----------------------------------------------------------------------
 
     # GitHub
     "GITHUB_TOKEN": "GITHUB_TOKEN",
@@ -79,62 +220,301 @@ _CANONICAL_ALIASES: dict[str, str] = {
     "GH_TOKEN": "GITHUB_TOKEN",
     "GITHUB_PAT": "GITHUB_TOKEN",
 
+    # GitLab
+    "GITLAB_KEY": "GITLAB_TOKEN",
+    "GITLAB_API_TOKEN": "GITLAB_TOKEN",
+    "GITLAB_ACCESS_TOKEN": "GITLAB_TOKEN",
+    "GITLAB_PAT": "GITLAB_TOKEN",
+
+    # Bitbucket
+    "BITBUCKET_KEY": "BITBUCKET_TOKEN",
+    "BITBUCKET_API_TOKEN": "BITBUCKET_TOKEN",
+
+    # -----------------------------------------------------------------------
+    # Databases / BaaS
+    # -----------------------------------------------------------------------
+
+    # Supabase
+    "SUPABASE_KEY": "SUPABASE_ANON_KEY",
+    "SUPABASE_API_KEY": "SUPABASE_ANON_KEY",
+    "SUPABASE_SECRET": "SUPABASE_SERVICE_ROLE_KEY",
+    "SUPABASE_SERVICE_KEY": "SUPABASE_SERVICE_ROLE_KEY",
+
+    # Firebase
+    "FIREBASE_KEY": "FIREBASE_API_KEY",
+    "FIREBASE_CONFIG": "FIREBASE_API_KEY",
+    "FIREBASE_SERVICE_ACCOUNT_KEY": "FIREBASE_SERVICE_ACCOUNT",
+    "FIREBASE_SA": "FIREBASE_SERVICE_ACCOUNT",
+
+    # MongoDB Atlas
+    "MONGO_URI": "MONGODB_URI",
+    "MONGODB_URL": "MONGODB_URI",
+    "MONGO_URL": "MONGODB_URI",
+    "MONGO_CONNECTION_STRING": "MONGODB_URI",
+
+    # PostgreSQL
+    "POSTGRES_URL": "DATABASE_URL",
+    "POSTGRES_URI": "DATABASE_URL",
+    "PG_URL": "DATABASE_URL",
+    "PG_CONNECTION_STRING": "DATABASE_URL",
+    "POSTGRESQL_URL": "DATABASE_URL",
+
+    # Redis
+    "REDIS_URI": "REDIS_URL",
+    "REDIS_CONNECTION": "REDIS_URL",
+    "REDIS_CONNECTION_STRING": "REDIS_URL",
+
+    # PlanetScale
+    "PLANETSCALE_URL": "PLANETSCALE_DATABASE_URL",
+    "PLANETSCALE_URI": "PLANETSCALE_DATABASE_URL",
+
+    # Neon
+    "NEON_URL": "NEON_DATABASE_URL",
+    "NEON_URI": "NEON_DATABASE_URL",
+    "NEON_CONNECTION_STRING": "NEON_DATABASE_URL",
+
+    # Upstash (Redis / Kafka)
+    "UPSTASH_REDIS_KEY": "UPSTASH_REDIS_REST_TOKEN",
+    "UPSTASH_TOKEN": "UPSTASH_REDIS_REST_TOKEN",
+
+    # Convex
+    "CONVEX_KEY": "CONVEX_DEPLOY_KEY",
+
+    # -----------------------------------------------------------------------
+    # Auth / Identity
+    # -----------------------------------------------------------------------
+
+    # Auth0
+    "AUTH0_KEY": "AUTH0_CLIENT_SECRET",
+    "AUTH0_API_KEY": "AUTH0_CLIENT_SECRET",
+
+    # Clerk
+    "CLERK_KEY": "CLERK_SECRET_KEY",
+    "CLERK_API_KEY": "CLERK_SECRET_KEY",
+
+    # Supabase Auth (uses SUPABASE_ANON_KEY above)
+
+    # NextAuth / Auth.js
+    "NEXTAUTH_KEY": "NEXTAUTH_SECRET",
+    "AUTH_SECRET": "NEXTAUTH_SECRET",
+
+    # -----------------------------------------------------------------------
+    # Payment / Commerce
+    # -----------------------------------------------------------------------
+
+    # Stripe
+    "STRIPE_API_KEY": "STRIPE_SECRET_KEY",
+    "STRIPE_KEY": "STRIPE_SECRET_KEY",
+    "STRIPE_PK": "STRIPE_PUBLISHABLE_KEY",
+    "STRIPE_PUBLIC_KEY": "STRIPE_PUBLISHABLE_KEY",
+    "STRIPE_WEBHOOK": "STRIPE_WEBHOOK_SECRET",
+
+    # PayPal
+    "PAYPAL_KEY": "PAYPAL_CLIENT_SECRET",
+    "PAYPAL_SECRET": "PAYPAL_CLIENT_SECRET",
+    "PAYPAL_API_KEY": "PAYPAL_CLIENT_SECRET",
+
+    # Lemon Squeezy
+    "LEMONSQUEEZY_KEY": "LEMONSQUEEZY_API_KEY",
+    "LEMON_SQUEEZY_KEY": "LEMONSQUEEZY_API_KEY",
+
+    # -----------------------------------------------------------------------
+    # Communication / Messaging
+    # -----------------------------------------------------------------------
+
     # Slack
     "SLACK_TOKEN": "SLACK_BOT_TOKEN",
     "SLACK_API_TOKEN": "SLACK_BOT_TOKEN",
     "SLACK_APP_TOKEN": "SLACK_BOT_TOKEN",
     "SLACK_SIGNING_KEY": "SLACK_SIGNING_SECRET",
+    "SLACK_WEBHOOK": "SLACK_WEBHOOK_URL",
 
-    # Stripe
-    "STRIPE_API_KEY": "STRIPE_SECRET_KEY",
-    "STRIPE_KEY": "STRIPE_SECRET_KEY",
+    # Discord
+    "DISCORD_KEY": "DISCORD_BOT_TOKEN",
+    "DISCORD_TOKEN": "DISCORD_BOT_TOKEN",
+    "DISCORD_API_KEY": "DISCORD_BOT_TOKEN",
+    "DISCORD_SECRET": "DISCORD_CLIENT_SECRET",
 
-    # Supabase
-    "SUPABASE_KEY": "SUPABASE_ANON_KEY",
-    "SUPABASE_API_KEY": "SUPABASE_ANON_KEY",
+    # Twilio
+    "TWILIO_KEY": "TWILIO_AUTH_TOKEN",
+    "TWILIO_API_KEY": "TWILIO_AUTH_TOKEN",
+    "TWILIO_SECRET": "TWILIO_AUTH_TOKEN",
 
-    # Firebase
-    "FIREBASE_KEY": "FIREBASE_API_KEY",
-    "FIREBASE_CONFIG": "FIREBASE_API_KEY",
+    # SendGrid
+    "SENDGRID_KEY": "SENDGRID_API_KEY",
+    "SENDGRID_TOKEN": "SENDGRID_API_KEY",
 
-    # AWS
-    "AWS_KEY": "AWS_ACCESS_KEY_ID",
-    "AWS_ACCESS_KEY": "AWS_ACCESS_KEY_ID",
-    "AWS_SECRET": "AWS_SECRET_ACCESS_KEY",
-    "AWS_SECRET_KEY": "AWS_SECRET_ACCESS_KEY",
+    # Resend
+    "RESEND_KEY": "RESEND_API_KEY",
+    "RESEND_TOKEN": "RESEND_API_KEY",
+
+    # Postmark
+    "POSTMARK_KEY": "POSTMARK_API_TOKEN",
+    "POSTMARK_API_KEY": "POSTMARK_API_TOKEN",
+
+    # Mailgun
+    "MAILGUN_KEY": "MAILGUN_API_KEY",
+
+    # Telegram
+    "TELEGRAM_KEY": "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_TOKEN": "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_API_KEY": "TELEGRAM_BOT_TOKEN",
+
+    # -----------------------------------------------------------------------
+    # Notion / Productivity
+    # -----------------------------------------------------------------------
 
     # Notion
     "NOTION_API_KEY": "NOTION_TOKEN",
     "NOTION_KEY": "NOTION_TOKEN",
     "NOTION_INTEGRATION_TOKEN": "NOTION_TOKEN",
+    "NOTION_SECRET": "NOTION_TOKEN",
 
-    # Twilio
-    "TWILIO_KEY": "TWILIO_AUTH_TOKEN",
-    "TWILIO_API_KEY": "TWILIO_AUTH_TOKEN",
+    # Airtable
+    "AIRTABLE_KEY": "AIRTABLE_API_KEY",
+    "AIRTABLE_TOKEN": "AIRTABLE_API_KEY",
+    "AIRTABLE_PAT": "AIRTABLE_API_KEY",
 
-    # SendGrid
-    "SENDGRID_KEY": "SENDGRID_API_KEY",
+    # Linear
+    "LINEAR_TOKEN": "LINEAR_API_KEY",
+    "LINEAR_KEY": "LINEAR_API_KEY",
 
-    # Resend
-    "RESEND_KEY": "RESEND_API_KEY",
+    # -----------------------------------------------------------------------
+    # Analytics / Monitoring
+    # -----------------------------------------------------------------------
 
-    # Replicate
-    "REPLICATE_KEY": "REPLICATE_API_TOKEN",
-    "REPLICATE_API_KEY": "REPLICATE_API_TOKEN",
+    # Sentry
+    "SENTRY_KEY": "SENTRY_DSN",
+    "SENTRY_TOKEN": "SENTRY_AUTH_TOKEN",
 
-    # ElevenLabs
-    "ELEVENLABS_KEY": "ELEVENLABS_API_KEY",
-    "ELEVEN_LABS_API_KEY": "ELEVENLABS_API_KEY",
-    "ELEVEN_LABS_KEY": "ELEVENLABS_API_KEY",
+    # Segment
+    "SEGMENT_KEY": "SEGMENT_WRITE_KEY",
+    "SEGMENT_API_KEY": "SEGMENT_WRITE_KEY",
 
-    # Pinecone
-    "PINECONE_KEY": "PINECONE_API_KEY",
+    # Mixpanel
+    "MIXPANEL_KEY": "MIXPANEL_TOKEN",
+    "MIXPANEL_API_KEY": "MIXPANEL_TOKEN",
 
-    # Hugging Face
-    "HF_TOKEN": "HUGGINGFACE_API_KEY",
-    "HF_API_KEY": "HUGGINGFACE_API_KEY",
-    "HUGGINGFACE_TOKEN": "HUGGINGFACE_API_KEY",
-    "HUGGING_FACE_API_KEY": "HUGGINGFACE_API_KEY",
+    # PostHog
+    "POSTHOG_KEY": "POSTHOG_API_KEY",
+    "POSTHOG_TOKEN": "POSTHOG_API_KEY",
+
+    # Datadog
+    "DD_KEY": "DATADOG_API_KEY",
+    "DD_API_KEY": "DATADOG_API_KEY",
+    "DATADOG_KEY": "DATADOG_API_KEY",
+
+    # -----------------------------------------------------------------------
+    # Media / Storage
+    # -----------------------------------------------------------------------
+
+    # Cloudinary
+    "CLOUDINARY_KEY": "CLOUDINARY_API_KEY",
+    "CLOUDINARY_SECRET": "CLOUDINARY_API_SECRET",
+
+    # Uploadthing
+    "UPLOADTHING_KEY": "UPLOADTHING_SECRET",
+    "UPLOADTHING_TOKEN": "UPLOADTHING_SECRET",
+
+    # AWS S3 (uses AWS_ACCESS_KEY_ID above)
+    "S3_BUCKET": "AWS_S3_BUCKET",
+    "S3_BUCKET_NAME": "AWS_S3_BUCKET",
+
+    # -----------------------------------------------------------------------
+    # Maps / Geolocation
+    # -----------------------------------------------------------------------
+
+    # Mapbox
+    "MAPBOX_KEY": "MAPBOX_ACCESS_TOKEN",
+    "MAPBOX_API_KEY": "MAPBOX_ACCESS_TOKEN",
+    "MAPBOX_TOKEN": "MAPBOX_ACCESS_TOKEN",
+
+    # -----------------------------------------------------------------------
+    # CMS / Content
+    # -----------------------------------------------------------------------
+
+    # Contentful
+    "CONTENTFUL_KEY": "CONTENTFUL_ACCESS_TOKEN",
+    "CONTENTFUL_TOKEN": "CONTENTFUL_ACCESS_TOKEN",
+
+    # Sanity
+    "SANITY_KEY": "SANITY_API_TOKEN",
+    "SANITY_TOKEN": "SANITY_API_TOKEN",
+
+    # Strapi
+    "STRAPI_KEY": "STRAPI_API_TOKEN",
+    "STRAPI_TOKEN": "STRAPI_API_TOKEN",
+
+    # -----------------------------------------------------------------------
+    # Web Scraping / Data
+    # -----------------------------------------------------------------------
+
+    # Browserless
+    "BROWSERLESS_KEY": "BROWSERLESS_API_KEY",
+    "BROWSERLESS_TOKEN": "BROWSERLESS_API_KEY",
+
+    # ScrapingBee
+    "SCRAPINGBEE_KEY": "SCRAPINGBEE_API_KEY",
+
+    # Serper (Google Search API)
+    "SERPER_KEY": "SERPER_API_KEY",
+
+    # SerpAPI
+    "SERPAPI_KEY": "SERPAPI_API_KEY",
+    "SERP_API_KEY": "SERPAPI_API_KEY",
+
+    # Tavily (AI search)
+    "TAVILY_KEY": "TAVILY_API_KEY",
+
+    # -----------------------------------------------------------------------
+    # LangChain / AI Frameworks
+    # -----------------------------------------------------------------------
+
+    # LangChain / LangSmith
+    "LANGCHAIN_KEY": "LANGCHAIN_API_KEY",
+    "LANGSMITH_KEY": "LANGCHAIN_API_KEY",
+    "LANGSMITH_API_KEY": "LANGCHAIN_API_KEY",
+
+    # Weights & Biases
+    "WANDB_TOKEN": "WANDB_API_KEY",
+    "WANDB_KEY": "WANDB_API_KEY",
+
+    # -----------------------------------------------------------------------
+    # Misc / Utility
+    # -----------------------------------------------------------------------
+
+    # OpenWeatherMap
+    "OPENWEATHER_KEY": "OPENWEATHERMAP_API_KEY",
+    "OPENWEATHERMAP_KEY": "OPENWEATHERMAP_API_KEY",
+    "OWM_API_KEY": "OPENWEATHERMAP_API_KEY",
+
+    # Rapid API
+    "RAPIDAPI_KEY": "RAPID_API_KEY",
+    "X_RAPIDAPI_KEY": "RAPID_API_KEY",
+
+    # Ngrok
+    "NGROK_TOKEN": "NGROK_AUTHTOKEN",
+    "NGROK_KEY": "NGROK_AUTHTOKEN",
+    "NGROK_AUTH": "NGROK_AUTHTOKEN",
+
+    # Docker Hub
+    "DOCKER_TOKEN": "DOCKER_HUB_TOKEN",
+    "DOCKER_KEY": "DOCKER_HUB_TOKEN",
+    "DOCKERHUB_TOKEN": "DOCKER_HUB_TOKEN",
+
+    # NPM
+    "NPM_KEY": "NPM_TOKEN",
+    "NPM_API_TOKEN": "NPM_TOKEN",
+
+    # Hetzner
+    "HETZNER_KEY": "HETZNER_API_TOKEN",
+    "HETZNER_TOKEN": "HETZNER_API_TOKEN",
+
+    # DigitalOcean
+    "DO_TOKEN": "DIGITALOCEAN_TOKEN",
+    "DO_API_TOKEN": "DIGITALOCEAN_TOKEN",
+    "DIGITALOCEAN_KEY": "DIGITALOCEAN_TOKEN",
+    "DIGITALOCEAN_API_KEY": "DIGITALOCEAN_TOKEN",
 }
 
 # Build reverse index: canonical → set of all variant names (including itself)
@@ -142,6 +522,123 @@ _CANONICAL_TO_VARIANTS: dict[str, set[str]] = {}
 for _variant, _canonical in _CANONICAL_ALIASES.items():
     _CANONICAL_TO_VARIANTS.setdefault(_canonical, set()).add(_variant)
     _CANONICAL_TO_VARIANTS[_canonical].add(_canonical)
+
+
+# ---------------------------------------------------------------------------
+# Environment Library Catalog
+# ---------------------------------------------------------------------------
+# Organized listing of all canonical env vars the system knows about,
+# grouped by service category for display / template generation.
+
+_ENV_LIBRARY_CATEGORIES: dict[str, list[str]] = {
+    "AI / LLM Services": sorted({
+        "OPENAI_API_KEY", "OPENAI_ORGANIZATION", "ANTHROPIC_API_KEY",
+        "GOOGLE_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_CLOUD_PROJECT",
+        "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT",
+        "COHERE_API_KEY", "MISTRAL_API_KEY", "GROQ_API_KEY",
+        "TOGETHER_API_KEY", "PERPLEXITY_API_KEY", "FIREWORKS_API_KEY",
+        "DEEPSEEK_API_KEY", "HUGGINGFACE_API_KEY", "REPLICATE_API_TOKEN",
+        "STABILITY_API_KEY", "ELEVENLABS_API_KEY", "VOYAGE_API_KEY",
+    }),
+    "Vector Databases / Search": sorted({
+        "PINECONE_API_KEY", "WEAVIATE_API_KEY", "QDRANT_API_KEY",
+        "CHROMA_API_KEY", "ALGOLIA_API_KEY", "ALGOLIA_APP_ID",
+    }),
+    "Cloud Platforms": sorted({
+        "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+        "AWS_DEFAULT_REGION",
+        "AZURE_SUBSCRIPTION_KEY", "AZURE_TENANT_ID", "AZURE_CLIENT_ID",
+        "AZURE_CLIENT_SECRET",
+        "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID",
+        "VERCEL_TOKEN", "NETLIFY_AUTH_TOKEN", "RAILWAY_TOKEN", "FLY_API_TOKEN",
+    }),
+    "Code / Version Control": sorted({
+        "GITHUB_TOKEN", "GITLAB_TOKEN", "BITBUCKET_TOKEN",
+    }),
+    "Databases / BaaS": sorted({
+        "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_URL",
+        "FIREBASE_API_KEY", "FIREBASE_SERVICE_ACCOUNT",
+        "MONGODB_URI", "DATABASE_URL", "REDIS_URL",
+        "PLANETSCALE_DATABASE_URL", "NEON_DATABASE_URL",
+        "UPSTASH_REDIS_REST_TOKEN", "CONVEX_DEPLOY_KEY",
+    }),
+    "Auth / Identity": sorted({
+        "AUTH0_CLIENT_SECRET", "AUTH0_CLIENT_ID", "AUTH0_DOMAIN",
+        "CLERK_SECRET_KEY", "CLERK_PUBLISHABLE_KEY",
+        "NEXTAUTH_SECRET", "NEXTAUTH_URL",
+    }),
+    "Payment / Commerce": sorted({
+        "STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET",
+        "PAYPAL_CLIENT_SECRET", "PAYPAL_CLIENT_ID",
+        "LEMONSQUEEZY_API_KEY",
+    }),
+    "Communication / Messaging": sorted({
+        "SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET", "SLACK_WEBHOOK_URL",
+        "DISCORD_BOT_TOKEN", "DISCORD_CLIENT_SECRET",
+        "TWILIO_AUTH_TOKEN", "TWILIO_ACCOUNT_SID",
+        "SENDGRID_API_KEY", "RESEND_API_KEY",
+        "POSTMARK_API_TOKEN", "MAILGUN_API_KEY",
+        "TELEGRAM_BOT_TOKEN",
+    }),
+    "Notion / Productivity": sorted({
+        "NOTION_TOKEN", "AIRTABLE_API_KEY", "LINEAR_API_KEY",
+    }),
+    "Analytics / Monitoring": sorted({
+        "SENTRY_DSN", "SENTRY_AUTH_TOKEN",
+        "SEGMENT_WRITE_KEY", "MIXPANEL_TOKEN",
+        "POSTHOG_API_KEY", "DATADOG_API_KEY",
+    }),
+    "Media / Storage": sorted({
+        "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET",
+        "UPLOADTHING_SECRET", "AWS_S3_BUCKET",
+    }),
+    "Maps / Geolocation": sorted({
+        "MAPBOX_ACCESS_TOKEN",
+    }),
+    "CMS / Content": sorted({
+        "CONTENTFUL_ACCESS_TOKEN", "SANITY_API_TOKEN", "STRAPI_API_TOKEN",
+    }),
+    "Web Scraping / Data": sorted({
+        "BROWSERLESS_API_KEY", "SCRAPINGBEE_API_KEY",
+        "SERPER_API_KEY", "SERPAPI_API_KEY", "TAVILY_API_KEY",
+    }),
+    "AI Frameworks / MLOps": sorted({
+        "LANGCHAIN_API_KEY", "WANDB_API_KEY",
+    }),
+    "Misc / Utility": sorted({
+        "OPENWEATHERMAP_API_KEY", "RAPID_API_KEY",
+        "NGROK_AUTHTOKEN", "DOCKER_HUB_TOKEN", "NPM_TOKEN",
+        "HETZNER_API_TOKEN", "DIGITALOCEAN_TOKEN",
+    }),
+}
+
+# Total count for quick reference
+ENV_LIBRARY_SIZE: int = sum(len(v) for v in _ENV_LIBRARY_CATEGORIES.values())
+
+
+def list_environment_library() -> dict[str, list[str]]:
+    """Return the full environment library catalog.
+
+    Returns a dict mapping category name to a sorted list of canonical
+    env var names recognized by the credential store.  Each canonical name
+    may have multiple aliases (see ``get_aliases_for``).
+
+    Example::
+
+        for category, vars in list_environment_library().items():
+            print(f"\\n{category}:")
+            for v in vars:
+                print(f"  {v}")
+    """
+    return dict(_ENV_LIBRARY_CATEGORIES)
+
+
+def get_aliases_for(canonical_name: str) -> set[str]:
+    """Return all known alias names for a given canonical env var.
+
+    If the name is unknown, returns an empty set.
+    """
+    return set(_CANONICAL_TO_VARIANTS.get(canonical_name, set()))
 
 
 def resolve_credential(
