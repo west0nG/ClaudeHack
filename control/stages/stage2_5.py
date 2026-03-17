@@ -13,11 +13,10 @@ Supports two collection modes:
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import time
 from pathlib import Path
 
+from control.config import PERSISTENT_CREDS_PATH, STAGE2_5_DIR
 from control.credential_store import (
     diff_credentials,
     generate_env_plan,
@@ -25,19 +24,16 @@ from control.credential_store import (
     load_persistent,
     parse_prerequisites,
     save_persistent,
-    validate_credential,
+)
+from control.credential_ui import (
+    collect_credentials_cli,
+    collect_credentials_dashboard,
+    write_run_credentials,
 )
 from control.event_bus import EventBus
 from control.models import Event, slugify_name
-from control.session_manager import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
-
-STAGE2_5_DIR = PROJECT_ROOT / "workspace" / "stage2.5"
-PERSISTENT_CREDS_PATH = PROJECT_ROOT / "credentials.env"
-
-# Timeout for waiting on user credential input (10 minutes)
-CONFIG_TIMEOUT_SECONDS = 600
 
 
 async def run_config_gate(
@@ -150,11 +146,11 @@ async def run_config_gate(
                         needed_details[env_var]["projects"].append(slug)
 
         if ws_server and not no_dashboard:
-            new_creds = await _collect_credentials_dashboard(
+            new_creds = await collect_credentials_dashboard(
                 needed_details, already_have, event_bus, ws_server,
             )
         else:
-            new_creds = await _collect_credentials_cli(
+            new_creds = await collect_credentials_cli(
                 needed_details, already_have,
             )
 
@@ -171,7 +167,7 @@ async def run_config_gate(
     # Write per-run credentials.env (only keys relevant to this run)
     STAGE2_5_DIR.mkdir(parents=True, exist_ok=True)
     run_creds_path = STAGE2_5_DIR / "credentials.env"
-    _write_run_credentials(run_creds_path, merged_creds, all_needed_vars)
+    write_run_credentials(run_creds_path, merged_creds, all_needed_vars)
 
     # Step 5: Generate environment-plan.md per project and determine blocking
     approved_dirs: list[Path] = []
@@ -230,230 +226,3 @@ async def run_config_gate(
     ))
 
     return approved_dirs, merged_creds, project_needed_vars
-
-
-# ---------------------------------------------------------------------------
-# Dashboard mode: WebSocket-based credential collection
-# ---------------------------------------------------------------------------
-
-async def _collect_credentials_dashboard(
-    needed_details: dict[str, dict],
-    already_have: set[str],
-    event_bus: EventBus,
-    ws_server: "WebSocketServer",
-) -> dict[str, str]:
-    """Collect missing credentials via Dashboard WebSocket UI.
-
-    Emits config_requested event, waits for config_response message from
-    the dashboard containing filled-in credential values.
-    """
-    # Build serializable payload for the dashboard
-    satisfied = [{"env_var": v} for v in sorted(already_have)]
-
-    carrier_list = []
-    functional_list = []
-    for env_var, detail in sorted(needed_details.items()):
-        entry = {
-            "env_var": env_var,
-            "name": detail["name"],
-            "obtain": detail.get("obtain", ""),
-            "projects": detail["projects"],
-        }
-        if detail["category"] == "carrier":
-            carrier_list.append(entry)
-        else:
-            functional_list.append(entry)
-
-    await event_bus.emit(Event(
-        type="config_requested",
-        data={
-            "satisfied": satisfied,
-            "carrier": carrier_list,
-            "functional": functional_list,
-        },
-    ))
-
-    logger.info(
-        "Waiting for credential input from dashboard (%d carrier, %d functional, %ds timeout)...",
-        len(carrier_list), len(functional_list), CONFIG_TIMEOUT_SECONDS,
-    )
-
-    # Register validation handler so dashboard can validate individual keys.
-    # NOTE: ws_server._dispatch_message calls handlers synchronously, so this
-    # must be a regular function that schedules async work via create_task.
-    def handle_validate_request(message: dict) -> None:
-        env_var = message.get("env_var", "")
-        value = message.get("value", "")
-
-        async def _do_validate() -> None:
-            result = await validate_credential(env_var, value)
-            await event_bus.emit(Event(
-                type="config_validate_response",
-                data={"env_var": env_var, **result},
-            ))
-
-        asyncio.create_task(_do_validate())
-
-    ws_server.register_handler("config_validate_request", handle_validate_request)
-
-    # Wait for dashboard response
-    loop = asyncio.get_running_loop()
-    response_future: asyncio.Future[dict] = loop.create_future()
-
-    def handle_config_response(message: dict) -> None:
-        if not response_future.done():
-            response_future.set_result(message)
-
-    ws_server.register_handler("config_response", handle_config_response)
-
-    try:
-        response = await asyncio.wait_for(
-            response_future, timeout=CONFIG_TIMEOUT_SECONDS,
-        )
-    except asyncio.TimeoutError:
-        logger.warning("ConfigGate dashboard timeout — proceeding with no new credentials")
-        return {}
-    finally:
-        ws_server.unregister_handler("config_response")
-        ws_server.unregister_handler("config_validate_request")
-
-    # Extract credentials from response: {credentials: {ENV_VAR: "value", ...}}
-    new_creds: dict[str, str] = {}
-    raw_creds = response.get("credentials", {})
-    for env_var, value in raw_creds.items():
-        value = str(value).strip()
-        if value:
-            new_creds[env_var] = value
-
-    logger.info("Dashboard provided %d credentials", len(new_creds))
-
-    await event_bus.emit(Event(
-        type="config_collected",
-        data={"count": len(new_creds)},
-    ))
-
-    return new_creds
-
-
-# ---------------------------------------------------------------------------
-# CLI mode: interactive terminal-based credential collection
-# ---------------------------------------------------------------------------
-
-async def _collect_credentials_cli(
-    needed_details: dict[str, dict],
-    already_have: set[str],
-) -> dict[str, str]:
-    """Collect missing credentials via CLI interactive prompt."""
-    new_creds: dict[str, str] = {}
-
-    print("\n" + "=" * 60)
-    print("ConfigGate: Credential Collection")
-    print("=" * 60)
-
-    if already_have:
-        print(f"\nAlready satisfied ({len(already_have)}):")
-        for var in sorted(already_have):
-            print(f"  ✅ {var}")
-
-    # Separate carrier and functional
-    carrier_vars = {k: v for k, v in needed_details.items() if v["category"] == "carrier"}
-    functional_vars = {k: v for k, v in needed_details.items() if v["category"] == "functional"}
-
-    if carrier_vars:
-        print(f"\nRequired credentials ({len(carrier_vars)}) — projects will be BLOCKED without these:")
-        for env_var, detail in sorted(carrier_vars.items()):
-            print(f"\n  🔑 {env_var} — {detail['name']}")
-            if detail["obtain"]:
-                print(f"     Obtain: {detail['obtain']}")
-            print(f"     Used by: {', '.join(detail['projects'])}")
-
-            value = await _prompt_and_validate(env_var, required=True)
-            if value:
-                new_creds[env_var] = value
-
-    if functional_vars:
-        print(f"\nOptional credentials ({len(functional_vars)}) — features will be skipped if missing:")
-        for env_var, detail in sorted(functional_vars.items()):
-            print(f"\n  🔧 {env_var} — {detail['name']}")
-            if detail["obtain"]:
-                print(f"     Obtain: {detail['obtain']}")
-            print(f"     Used by: {', '.join(detail['projects'])}")
-
-            value = await _prompt_and_validate(env_var, required=False)
-            if value:
-                new_creds[env_var] = value
-
-    print(f"\nCollected {len(new_creds)} new credentials.")
-    print("=" * 60 + "\n")
-
-    return new_creds
-
-
-def _prompt_credential(env_var: str, required: bool = True) -> str:
-    """Prompt user for a single credential value.
-
-    Returns the value, or empty string if skipped.
-    """
-    label = "(required)" if required else "(optional, Enter to skip)"
-    try:
-        value = input(f"     Enter value {label}: ").strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return ""
-    return value
-
-
-async def _prompt_and_validate(
-    env_var: str,
-    required: bool,
-    max_attempts: int = 3,
-) -> str:
-    """Prompt for a credential and validate it, with retries on failure.
-
-    Returns the accepted value, or empty string if skipped.
-    """
-    loop = asyncio.get_running_loop()
-    for attempt in range(1, max_attempts + 1):
-        value = await loop.run_in_executor(
-            None, _prompt_credential, env_var, required,
-        )
-        if not value:
-            return ""
-
-        # Validate
-        print("     Validating...", end="", flush=True)
-        result = await validate_credential(env_var, value)
-
-        if result["skipped"]:
-            print(" skipped (no validator for this key type)")
-            return value
-
-        if result["valid"]:
-            if result["warning"]:
-                print(f" ⚠️  {result['warning']}")
-            else:
-                print(" ✅ valid")
-            return value
-
-        # Validation failed
-        print(f" ❌ {result['error']}")
-        if attempt < max_attempts:
-            print(f"     Please try again ({max_attempts - attempt} attempts remaining)")
-        else:
-            print("     Max attempts reached — accepting value with warning")
-            return value
-
-    return ""
-
-
-def _write_run_credentials(
-    path: Path, all_creds: dict[str, str], needed_vars: set[str]
-) -> None:
-    """Write per-run credentials.env containing only keys relevant to this run."""
-    lines = ["# Per-run credentials (auto-generated by ConfigGate)"]
-    for var in sorted(needed_vars):
-        value = all_creds.get(var, "")
-        if value:
-            lines.append(f"{var}={value}")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    logger.info("Wrote per-run credentials to %s (%d keys)", path, sum(1 for v in needed_vars if all_creds.get(v)))

@@ -8,43 +8,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import shutil
 from pathlib import Path
 
+from control.config import PROJECT_ROOT, STAGE2_5_DIR
 from control.event_bus import EventBus
 from control.models import Event, SessionConfig, SessionStatus, slugify_name
-from control.session_manager import PROJECT_ROOT, SessionManager
+from control.session_manager import SessionManager
+from control.template import read_prompt, render
 
 logger = logging.getLogger(__name__)
 
 PROMPTS_DIR = PROJECT_ROOT / "prompts" / "stage3"
 WORKSPACE_DIR = PROJECT_ROOT / "workspace" / "stage3"
-STAGE2_5_DIR = PROJECT_ROOT / "workspace" / "stage2.5"
-
-
-def _read_prompt(name: str) -> str:
-    return (PROMPTS_DIR / name).read_text(encoding="utf-8")
-
-
-def _render(template: str, **kwargs: str) -> str:
-    """Simple mustache-like template rendering.
-
-    Supports {{var}} replacement and {{#var}}...{{/var}} conditional blocks.
-    """
-    for key, value in kwargs.items():
-        open_tag = "{{#" + key + "}}"
-        close_tag = "{{/" + key + "}}"
-        pattern = re.escape(open_tag) + r"(.*?)" + re.escape(close_tag)
-        if value:
-            template = re.sub(pattern, r"\1", template, flags=re.DOTALL)
-        else:
-            template = re.sub(pattern, "", template, flags=re.DOTALL)
-
-    for key, value in kwargs.items():
-        template = template.replace("{{" + key + "}}", str(value))
-
-    return template
 
 
 def _slugify_prd_dir(prd_dir: Path) -> str:
@@ -157,15 +133,15 @@ async def _run_project_pipeline(
         dev_work_dir.mkdir(parents=True, exist_ok=True)
 
     # Load prompt templates
-    plan_template = _read_prompt("plan.md")
-    dev_template = _read_prompt("dev.md")
-    review_template = _read_prompt("review.md")
+    plan_template = read_prompt(PROMPTS_DIR,"plan.md")
+    dev_template = read_prompt(PROMPTS_DIR,"dev.md")
+    review_template = read_prompt(PROMPTS_DIR,"review.md")
 
     # ------------------------------------------------------------------
     # Session A: Plan (skip if dev-plan.md already exists)
     # ------------------------------------------------------------------
     if not skip_plan:
-        plan_prompt = _render(
+        plan_prompt = render(
             plan_template,
             theme=theme,
             concept_content=concept_content,
@@ -207,7 +183,7 @@ async def _run_project_pipeline(
     # ------------------------------------------------------------------
     # Session B: Dev (with credentials injected as env vars)
     # ------------------------------------------------------------------
-    dev_prompt = _render(
+    dev_prompt = render(
         dev_template,
         theme=theme,
         concept_content=concept_content,
@@ -239,7 +215,7 @@ async def _run_project_pipeline(
     # ------------------------------------------------------------------
     # Session C: Review (shares working directory with dev, credentials injected)
     # ------------------------------------------------------------------
-    review_prompt = _render(
+    review_prompt = render(
         review_template,
         theme=theme,
         concept_content=concept_content,

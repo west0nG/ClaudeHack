@@ -13,13 +13,11 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+from control.config import STAGE2_OUTPUT_DIR, find_prd_dir_for_project
 from control.event_bus import EventBus
 from control.models import Event
-from control.session_manager import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
-
-STAGE2_OUTPUT_DIR = PROJECT_ROOT / "workspace" / "stage2" / "output"
 
 
 def _extract_project_name(concept_path: Path) -> str:
@@ -45,29 +43,6 @@ def _slugify_project_name(name: str) -> str:
     slug = re.sub(r"[^a-z0-9-]", "-", name.lower())
     slug = re.sub(r"-+", "-", slug).strip("-")
     return slug[:60] or "project"
-
-
-def _find_prd_dir_for_project(project_dir: Path) -> Path | None:
-    """Find the corresponding Stage 2 output directory for a project.
-
-    project_dir is typically workspace/stage3/{slug}/dev/demo/.
-    The slug should match the Stage 2 output directory name.
-    """
-    # Walk up from demo/ -> dev/ -> {slug}/
-    slug_dir = project_dir.parent.parent  # demo -> dev -> {slug}
-    slug = slug_dir.name
-
-    prd_dir = STAGE2_OUTPUT_DIR / slug
-    if prd_dir.is_dir() and (prd_dir / "concept.md").exists():
-        return prd_dir
-
-    # Fallback: scan stage2/output for matching slug
-    if STAGE2_OUTPUT_DIR.is_dir():
-        for d in STAGE2_OUTPUT_DIR.iterdir():
-            if d.is_dir() and d.name == slug and (d / "concept.md").exists():
-                return d
-
-    return None
 
 
 def _generate_readme(project_name: str, concept_text: str, technical_text: str, publish_mode: str = "test") -> str:
@@ -374,7 +349,7 @@ async def run_stage4(
         if prd_dirs and i < len(prd_dirs):
             prd_dir = prd_dirs[i]
         else:
-            prd_dir = _find_prd_dir_for_project(project_dir)
+            prd_dir = find_prd_dir_for_project(project_dir)
 
         # Pre-compute repo name to detect collisions
         if prd_dir and (prd_dir / "concept.md").exists():

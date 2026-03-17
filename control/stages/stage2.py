@@ -12,38 +12,16 @@ import re
 import shutil
 from pathlib import Path
 
+from control.config import PROJECT_ROOT
 from control.event_bus import EventBus
 from control.models import Event, SessionConfig, SessionStatus
-from control.session_manager import PROJECT_ROOT, SessionManager
+from control.session_manager import SessionManager
+from control.template import read_prompt, render
 
 logger = logging.getLogger(__name__)
 
 PROMPTS_DIR = PROJECT_ROOT / "prompts" / "stage2"
 WORKSPACE_DIR = PROJECT_ROOT / "workspace" / "stage2"
-
-
-def _read_prompt(name: str) -> str:
-    return (PROMPTS_DIR / name).read_text(encoding="utf-8")
-
-
-def _render(template: str, **kwargs: str) -> str:
-    """Simple mustache-like template rendering.
-
-    Supports {{var}} replacement and {{#var}}...{{/var}} conditional blocks.
-    """
-    for key, value in kwargs.items():
-        open_tag = "{{#" + key + "}}"
-        close_tag = "{{/" + key + "}}"
-        pattern = re.escape(open_tag) + r"(.*?)" + re.escape(close_tag)
-        if value:
-            template = re.sub(pattern, r"\1", template, flags=re.DOTALL)
-        else:
-            template = re.sub(pattern, "", template, flags=re.DOTALL)
-
-    for key, value in kwargs.items():
-        template = template.replace("{{" + key + "}}", str(value))
-
-    return template
 
 
 def _slugify(card_path: Path) -> str:
@@ -86,9 +64,9 @@ async def _run_card_pipeline(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load prompt templates
-    concept_template = _read_prompt("concept.md")
-    logic_template = _read_prompt("logic.md")
-    technical_template = _read_prompt("technical.md")
+    concept_template = read_prompt(PROMPTS_DIR,"concept.md")
+    logic_template = read_prompt(PROMPTS_DIR,"logic.md")
+    technical_template = read_prompt(PROMPTS_DIR,"technical.md")
 
     # ------------------------------------------------------------------
     # Session 1: Concept
@@ -96,7 +74,7 @@ async def _run_card_pipeline(
     concept_work_dir = base_work_dir / "concept"
     concept_work_dir.mkdir(parents=True, exist_ok=True)
 
-    concept_prompt = _render(
+    concept_prompt = render(
         concept_template,
         theme=theme,
         idea_card_content=card_content,
@@ -151,7 +129,7 @@ async def _run_card_pipeline(
     logic_work_dir = base_work_dir / "logic"
     logic_work_dir.mkdir(parents=True, exist_ok=True)
 
-    logic_prompt = _render(
+    logic_prompt = render(
         logic_template,
         theme=theme,
         idea_card_content=card_content,
@@ -193,7 +171,7 @@ async def _run_card_pipeline(
     tech_work_dir = base_work_dir / "technical"
     tech_work_dir.mkdir(parents=True, exist_ok=True)
 
-    technical_prompt = _render(
+    technical_prompt = render(
         technical_template,
         theme=theme,
         concept_content=concept_content,

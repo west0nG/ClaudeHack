@@ -9,15 +9,15 @@ import os
 import time
 from pathlib import Path
 
+from control.config import LOGS_DIR, PROJECT_ROOT
 from control.event_bus import EventBus
 from control.models import Event, SessionConfig, SessionResult, SessionStatus
 from control.session_logger import SessionLogger
 
 logger = logging.getLogger(__name__)
 
-# Project root — used to resolve relative working dirs
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-LOGS_DIR = PROJECT_ROOT / "workspace" / "logs"
+# Re-export for backwards compatibility (many modules import from here)
+__all__ = ["SessionManager", "PROJECT_ROOT"]
 
 
 class SessionManager:

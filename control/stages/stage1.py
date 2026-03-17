@@ -9,75 +9,17 @@ import re
 import shutil
 from pathlib import Path
 
+from control.config import PROJECT_ROOT
 from control.event_bus import EventBus
 from control.models import CrowdDirection, Event, HackathonBrief, SessionConfig, SessionResult, SessionStatus
-from control.session_manager import PROJECT_ROOT, SessionManager
+from control.session_manager import SessionManager
+from control.template import extract_text_from_stream_json, read_prompt, render
 
 logger = logging.getLogger(__name__)
 
 PROMPTS_DIR = PROJECT_ROOT / "prompts" / "stage1"
 WORKSPACE_DIR = PROJECT_ROOT / "workspace" / "stage1"
 
-
-def _read_prompt(name: str) -> str:
-    return (PROMPTS_DIR / name).read_text(encoding="utf-8")
-
-
-def _render(template: str, **kwargs: str) -> str:
-    """Simple mustache-like template rendering.
-
-    Supports {{var}} replacement and {{#var}}...{{/var}} conditional blocks.
-    """
-    # Handle conditional blocks first
-    for key, value in kwargs.items():
-        # If value is truthy, keep the block content; otherwise remove it
-        open_tag = "{{#" + key + "}}"
-        close_tag = "{{/" + key + "}}"
-        pattern = re.escape(open_tag) + r"(.*?)" + re.escape(close_tag)
-        if value:
-            template = re.sub(pattern, r"\1", template, flags=re.DOTALL)
-        else:
-            template = re.sub(pattern, "", template, flags=re.DOTALL)
-
-    # Then replace simple variables
-    for key, value in kwargs.items():
-        template = template.replace("{{" + key + "}}", str(value))
-
-    return template
-
-
-def _extract_text_from_stream_json(raw_output: str) -> str:
-    """Extract the full assistant text from stream-json output.
-
-    Tries two approaches:
-    1. Look for the 'result' event which contains the complete text
-    2. Accumulate text from content_block_delta events
-    """
-    result_text = ""
-    accumulated_text = ""
-
-    for line in raw_output.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        etype = event.get("type", "")
-
-        if etype == "result":
-            r = event.get("result", "")
-            if isinstance(r, str):
-                result_text = r
-
-        elif etype == "content_block_delta":
-            delta = event.get("delta", {})
-            if delta.get("type") == "text_delta":
-                accumulated_text += delta.get("text", "")
-
-    return result_text or accumulated_text
 
 
 def _extract_json_array(text: str, require_dicts: bool = True) -> list | None:
@@ -133,7 +75,7 @@ def _parse_directions(result: SessionResult) -> list[CrowdDirection]:
     raw = result.output
 
     # Strategy 1: extract text from stream-json, then parse JSON
-    text = _extract_text_from_stream_json(raw)
+    text = extract_text_from_stream_json(raw)
     if text:
         data = _extract_json_array(text)
         if data and "slug" in data[0]:
@@ -246,7 +188,7 @@ Output ONLY the JSON array, nothing else."""
         return new_cards
 
     # Parse the response to get list of filenames to keep
-    text = _extract_text_from_stream_json(result.output) or result.output
+    text = extract_text_from_stream_json(result.output) or result.output
     keep_names: set[str] = set()
 
     # Extract JSON array of filenames (strings, not dicts)
@@ -311,8 +253,8 @@ async def run_stage1(
     # Step 1: Main Agent — expand theme into crowd directions
     # ------------------------------------------------------------------
     logger.info("Stage 1 Step 1: Expanding theme into crowd directions")
-    main_prompt = _render(
-        _read_prompt("main.md"),
+    main_prompt = render(
+        read_prompt(PROMPTS_DIR,"main.md"),
         theme=theme,
         interests=interests or "",
         hackathon_context=hackathon_context,
@@ -351,7 +293,7 @@ async def run_stage1(
     logger.info("Stage 1 Step 2: Launching %d research sessions", len(directions))
 
     # Build research configs
-    research_template = _read_prompt("research.md")
+    research_template = read_prompt(PROMPTS_DIR,"research.md")
     research_tasks: list[tuple[CrowdDirection, SessionConfig]] = []
 
     for d in directions:
@@ -359,7 +301,7 @@ async def run_stage1(
         scope_broad = "true" if d.scope == "broad" else ""
         scope_focused = "true" if d.scope != "broad" else ""
 
-        research_prompt = _render(
+        research_prompt = render(
             research_template,
             theme=theme,
             persona=d.persona,
@@ -461,7 +403,7 @@ async def run_stage1(
         # ------------------------------------------------------------------
         logger.info("Stage 1 Step 3: Running final review on %d cards", len(card_pool))
 
-        dedup_prompt = _read_prompt("dedup.md")
+        dedup_prompt = read_prompt(PROMPTS_DIR,"dedup.md")
         dedup_result = await session_mgr.run_session(SessionConfig(
             session_id="final-review-agent",
             prompt=dedup_prompt,

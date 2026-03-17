@@ -10,66 +10,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 import shutil
 from pathlib import Path
 
+from control.config import PROJECT_ROOT, find_prd_dir_for_project
 from control.event_bus import EventBus
 from control.models import Event, SessionConfig, SessionStatus
-from control.session_manager import PROJECT_ROOT, SessionManager
+from control.session_manager import SessionManager
+from control.template import read_prompt, render
 
 logger = logging.getLogger(__name__)
 
 PROMPTS_DIR = PROJECT_ROOT / "prompts" / "stage5"
 WORKSPACE_DIR = PROJECT_ROOT / "workspace" / "stage5"
-STAGE2_OUTPUT_DIR = PROJECT_ROOT / "workspace" / "stage2" / "output"
-
-
-def _read_prompt(name: str) -> str:
-    return (PROMPTS_DIR / name).read_text(encoding="utf-8")
-
-
-def _render(template: str, **kwargs: str) -> str:
-    """Simple mustache-like template rendering.
-
-    Supports {{var}} replacement and {{#var}}...{{/var}} conditional blocks.
-    """
-    for key, value in kwargs.items():
-        open_tag = "{{#" + key + "}}"
-        close_tag = "{{/" + key + "}}"
-        pattern = re.escape(open_tag) + r"(.*?)" + re.escape(close_tag)
-        if value:
-            template = re.sub(pattern, r"\1", template, flags=re.DOTALL)
-        else:
-            template = re.sub(pattern, "", template, flags=re.DOTALL)
-
-    for key, value in kwargs.items():
-        template = template.replace("{{" + key + "}}", str(value))
-
-    return template
-
-
-def _find_prd_dir_for_project(project_dir: Path) -> Path | None:
-    """Find the corresponding Stage 2 output directory for a project.
-
-    project_dir is typically workspace/stage3/{slug}/dev/demo/.
-    The slug should match the Stage 2 output directory name.
-    """
-    # Walk up from demo/ -> dev/ -> {slug}/
-    slug_dir = project_dir.parent.parent  # demo -> dev -> {slug}
-    slug = slug_dir.name
-
-    prd_dir = STAGE2_OUTPUT_DIR / slug
-    if prd_dir.is_dir() and (prd_dir / "concept.md").exists():
-        return prd_dir
-
-    # Fallback: scan stage2/output for matching slug
-    if STAGE2_OUTPUT_DIR.is_dir():
-        for d in STAGE2_OUTPUT_DIR.iterdir():
-            if d.is_dir() and d.name == slug and (d / "concept.md").exists():
-                return d
-
-    return None
 
 
 def _slug_from_project(project_dir: Path) -> str:
@@ -108,8 +61,8 @@ async def _run_pitch_pipeline(
     technical_content = (prd_dir / "technical.md").read_text(encoding="utf-8")
 
     # Load prompt templates
-    storyteller_template = _read_prompt("storyteller.md")
-    deck_builder_template = _read_prompt("deck-builder.md")
+    storyteller_template = read_prompt(PROMPTS_DIR,"storyteller.md")
+    deck_builder_template = read_prompt(PROMPTS_DIR,"deck-builder.md")
 
     # ------------------------------------------------------------------
     # Session 1: Storyteller
@@ -124,7 +77,7 @@ async def _run_pitch_pipeline(
     if not demo_link.exists():
         os.symlink(str(Path(project_dir).resolve()), str(demo_link))
 
-    storyteller_prompt = _render(
+    storyteller_prompt = render(
         storyteller_template,
         theme=theme,
         concept_content=concept_content,
@@ -185,7 +138,7 @@ async def _run_pitch_pipeline(
     # Copy pitch-script.md into deck working dir for reference
     shutil.copy2(script_file, deck_work_dir / "pitch-script.md")
 
-    deck_prompt = _render(
+    deck_prompt = render(
         deck_builder_template,
         theme=theme,
         concept_content=concept_content,
@@ -280,7 +233,7 @@ async def run_stage5(
         if prd_dirs and i < len(prd_dirs):
             prd_dir = prd_dirs[i]
         else:
-            prd_dir = _find_prd_dir_for_project(project_dir)
+            prd_dir = find_prd_dir_for_project(project_dir)
 
         if not prd_dir or not (prd_dir / "concept.md").exists():
             logger.warning("No PRD directory found for project %s, skipping pitch", project_dir)

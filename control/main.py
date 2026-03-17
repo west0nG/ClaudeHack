@@ -21,12 +21,13 @@ from pathlib import Path
 
 import shutil
 
-from control.credential_barrier import CredentialBarrier, PERSISTENT_CREDS_PATH
+from control.config import PERSISTENT_CREDS_PATH, PROJECT_ROOT
+from control.credential_barrier import CredentialBarrier
 from control.credential_store import load_all_credentials, load_persistent
 from control.event_bus import EventBus
 from control.models import Event, HackathonBrief, slugify_name
 from control.review_gate import ReviewGate
-from control.session_manager import PROJECT_ROOT, SessionManager
+from control.session_manager import SessionManager
 from control.stages.stage0 import run_stage0
 from control.stages.stage1 import run_stage1
 from control.stages.stage2 import run_stage2

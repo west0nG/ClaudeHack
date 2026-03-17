@@ -7,52 +7,17 @@ import logging
 import re
 from pathlib import Path
 
+from control.config import PROJECT_ROOT
 from control.event_bus import EventBus
 from control.models import Event, HackathonBrief, SessionConfig, SessionStatus
-from control.session_manager import PROJECT_ROOT, SessionManager
+from control.session_manager import SessionManager
+from control.template import extract_text_from_stream_json, read_prompt, render
 
 logger = logging.getLogger(__name__)
 
 PROMPTS_DIR = PROJECT_ROOT / "prompts" / "stage0"
 WORKSPACE_DIR = PROJECT_ROOT / "workspace" / "stage0"
 
-
-def _read_prompt(name: str) -> str:
-    return (PROMPTS_DIR / name).read_text(encoding="utf-8")
-
-
-def _render(template: str, **kwargs: str) -> str:
-    """Simple variable replacement for stage0 prompts."""
-    for key, value in kwargs.items():
-        template = template.replace("{{" + key + "}}", str(value))
-    return template
-
-
-def _extract_text_from_stream_json(raw_output: str) -> str:
-    """Extract assistant text from stream-json output."""
-    result_text = ""
-    accumulated_text = ""
-
-    for line in raw_output.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        etype = event.get("type", "")
-        if etype == "result":
-            r = event.get("result", "")
-            if isinstance(r, str):
-                result_text = r
-        elif etype == "content_block_delta":
-            delta = event.get("delta", {})
-            if delta.get("type") == "text_delta":
-                accumulated_text += delta.get("text", "")
-
-    return result_text or accumulated_text
 
 
 def _extract_json_object(text: str) -> dict | None:
@@ -108,7 +73,7 @@ async def run_stage0(
     work_dir = WORKSPACE_DIR / "interpreter"
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    prompt = _render(_read_prompt("interpreter.md"), raw_prompt=raw_prompt)
+    prompt = render(read_prompt(PROMPTS_DIR,"interpreter.md"), raw_prompt=raw_prompt)
 
     result = await session_mgr.run_session(SessionConfig(
         session_id="prompt-interpreter",
@@ -124,7 +89,7 @@ async def run_stage0(
         raise RuntimeError(f"Prompt interpreter failed: {result.error}")
 
     # Parse JSON output
-    text = _extract_text_from_stream_json(result.output)
+    text = extract_text_from_stream_json(result.output)
     data = _extract_json_object(text) if text else None
 
     if not data:
